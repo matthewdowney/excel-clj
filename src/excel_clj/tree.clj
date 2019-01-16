@@ -182,7 +182,7 @@
   ;; All the attr keys plus :depth (root is the max depth) and :label
   (loop [ts trees rendered []]
     (if-let [t (first ts)]
-      (if (map? t) ;; It's an already processed line, just add it an move on
+      (if (map? t) ;; It's an already processed line, just add it and move on
         (recur (rest ts) (conj rendered t))
         (let [t-depth (nth t 2 0)]
           (if (leaf? t) ;; It's a leaf, so display with all of its attributes
@@ -223,10 +223,9 @@
      xs))
   ([ks xs]
    (let [pad 2
-         max' (completing #(max %1 %2))
          len (fn [k]
                (let [len' #(or (some-> (% k) str count) 0)]
-                 (+ pad (transduce (map len') max' 0 xs))))
+                 (+ pad (transduce (map len') (completing max) 0 xs))))
          header (into {} (map (juxt identity identity)) ks)
          ks' (mapv (juxt identity len) ks)]
      (doseq [x (cons header xs)]
@@ -300,3 +299,10 @@
 ; Equity + Liabilities = {2018 217M, 2017 148M}
 ; Assets = {2018 217M, 2017 148M}
 
+(comment
+  ;; Or you can visualize with ztellman/rhizome
+  ;; Keep in mind that this requires $ apt-get install graphviz
+  (rhizome.viz/view-tree
+    (complement leaf?) children (second mock-balance-sheet)
+    :edge->descriptor (fn [x y] (when (leaf? y) {:label (label y)}))
+    :node->descriptor #(->{:label (if (leaf? %) (value %) [(label %) (value %)])})))
