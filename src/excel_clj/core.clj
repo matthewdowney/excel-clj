@@ -150,7 +150,7 @@
     data-style   is a function that takes (datum-map, column name) and returns
                  a style specification or nil for the default style."
   [tabular-data & {:keys [headers header-style data-style]
-                   :or {data-style style/best-guess-row-format}}]
+                   :or {data-style (constantly {})}}]
   (let [;; add the headers either in the order they're provided or in the order
         ;; of (seq) on the first datum
         headers (let [direction (if (> (count (last tabular-data))
@@ -164,7 +164,9 @@
         ;; justify, and therefore which headers to right justify by default
         numeric? (volatile! #{})
         data-cell (fn [col-name row]
-                    (let [style (data-style row col-name)]
+                    (let [style (style/merge-all
+                                  (or (data-style row col-name) {})
+                                  (style/best-guess-row-format row col-name))]
                       (when (or (= (:data-format style) :accounting)
                                 (number? (get row col-name "")))
                         (vswap! numeric? conj col-name))
@@ -198,46 +200,42 @@
   If provided, the formatters argument is a function that takes the integer
   depth of a category (increases with nesting) and returns a cell format for
   the row, and total-formatters is the same for rows that are totals."
-  ([t]
-   (tree t nil))
-  ([t headers]
-   (tree
-     t headers
-     style/default-tree-formatters style/default-tree-total-formatters))
-  ([t headers formatters total-formatters]
-   (try
-     (let [tabular (apply tree/render-table (second t))
-           fmt-or-max (fn [fs n]
-                        (or (get fs n) (second (apply max-key first fs))))
-           all-colls (or headers
-                         (sequence
-                           (comp
-                             (mapcat keys)
-                             (filter (complement #{:depth :label}))
-                             (distinct))
-                           tabular))
-           header-style {:font {:bold true} :alignment :right}]
-       (concat
-         ;; Title
-         [[{:value (first t) :style {:alignment :center}
-            :width (inc (count all-colls))}]]
+  [t & {:keys [headers formatters total-formatters]
+        :or {formatters style/default-tree-formatters
+             total-formatters style/default-tree-total-formatters}}]
+  (try
+    (let [tabular (apply tree/render-table (second t))
+          fmt-or-max (fn [fs n]
+                       (or (get fs n) (second (apply max-key first fs))))
+          all-colls (or headers
+                        (sequence
+                          (comp
+                            (mapcat keys)
+                            (filter (complement #{:depth :label}))
+                            (distinct))
+                          tabular))
+          header-style {:font {:bold true} :alignment :right}]
+      (concat
+        ;; Title
+        [[{:value (first t) :style {:alignment :center}
+           :width (inc (count all-colls))}]]
 
-         ;; Headers
-         [(into [""] (map #(->{:value % :style header-style})) all-colls)]
+        ;; Headers
+        [(into [""] (map #(->{:value % :style header-style})) all-colls)]
 
-         ;; Line items
-         (for [line tabular]
-           (let [total? (empty? (str (:label line)))
-                 format (or
-                          (fmt-or-max
-                            (if total? total-formatters formatters)
-                            (:depth line))
-                          {})
-                 style (style/merge-all format {:data-format :accounting})]
-             (into [{:value (:label line) :style (if total? {} style)}]
-                   (map #(->{:value (get line %) :style style})) all-colls)))))
-     (catch Exception e
-       (throw (ex-info "Failed to render tree" {:tree t} e))))))
+        ;; Line items
+        (for [line tabular]
+          (let [total? (empty? (str (:label line)))
+                format (or
+                         (fmt-or-max
+                           (if total? total-formatters formatters)
+                           (:depth line))
+                         {})
+                style (style/merge-all format {:data-format :accounting})]
+            (into [{:value (:label line) :style (if total? {} style)}]
+                  (map #(->{:value (get line %) :style style})) all-colls)))))
+    (catch Exception e
+      (throw (ex-info "Failed to render tree" {:tree t} e)))))
 
 (defn with-title
   "Write a title above the given grid with a width equal to the widest row."

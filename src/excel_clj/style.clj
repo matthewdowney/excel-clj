@@ -6,8 +6,8 @@
      :style {:data-format :percent,
              :font {:bold true :font-height-in-points 10}}}
 
-  The goal of the style map is to reuse all of the functionality built in to the
-  underlying Apache POI objects, but with immutable data structures.
+  The goal of the style map is to reuse all of the functionality built in to
+  the underlying Apache POI objects, but with immutable data structures.
 
   The primary advantage -- beyond the things we're accustomed to loving about
   clojure data maps as opposed to mutable objects with getters/setters -- other
@@ -58,9 +58,12 @@
           (coerce-to-obj
             workbook :font {:bold true :font-height-in-points 10}))))"
     :author "Matthew Downey"} excel-clj.style
-  (:require [clojure.string :as string])
+  (:require [clojure.string :as string]
+            [clojure.reflect :as reflect]
+            [rhizome.viz :as viz])
   (:import (org.apache.poi.ss.usermodel
-             DataFormat BorderStyle HorizontalAlignment FontUnderline)
+             DataFormat BorderStyle HorizontalAlignment FontUnderline
+             FillPatternType)
            (org.apache.poi.xssf.usermodel
              XSSFWorkbook XSSFColor DefaultIndexedColorMap XSSFCell)))
 
@@ -149,6 +152,27 @@
    :medium-dash-dot-dot BorderStyle/MEDIUM_DASH_DOT_DOT
    :slanted-dash-dot    BorderStyle/SLANTED_DASH_DOT})
 
+(def fill-patterns
+  {:no-fill             FillPatternType/NO_FILL
+   :solid-foreground    FillPatternType/SOLID_FOREGROUND
+   :fine-dots           FillPatternType/FINE_DOTS
+   :alt-bars            FillPatternType/ALT_BARS
+   :sparse-dots         FillPatternType/SPARSE_DOTS
+   :thick-horz-bands    FillPatternType/THICK_HORZ_BANDS
+   :thick-vert-bands    FillPatternType/THICK_VERT_BANDS
+   :thick-backward-diag FillPatternType/THICK_BACKWARD_DIAG
+   :thick-forward-diag  FillPatternType/THICK_FORWARD_DIAG
+   :big-spots           FillPatternType/BIG_SPOTS
+   :bricks              FillPatternType/BRICKS
+   :thin-horz-bands     FillPatternType/THIN_HORZ_BANDS
+   :thin-vert-bands     FillPatternType/THIN_VERT_BANDS
+   :thin-backward-diag  FillPatternType/THIN_BACKWARD_DIAG
+   :thin-forward-diag   FillPatternType/THIN_FORWARD_DIAG
+   :squares             FillPatternType/SQUARES
+   :diamonds            FillPatternType/DIAMONDS
+   :less_dots           FillPatternType/LESS_DOTS
+   :least_dots          FillPatternType/LEAST_DOTS})
+
 (def data-formats
   {:accounting "_($* #,##0.00_);_($* (#,##0.00);_($* \"-\"??_);_(@_)"
    :ymd "yyyy-MM-dd"
@@ -171,15 +195,21 @@
 (coerce-from-map :border-left borders)
 (coerce-from-map :border-right borders)
 (coerce-from-map :border-bottom borders)
+(coerce-from-map :fill-pattern fill-patterns)
 
-(coerce-from-map :color colors
-                 ;; If there's nothing in the map ...
-                 (fn [_ _ color]
-                   (if (and (coll? color) (= (count color) 3))
-                     (apply rgb-color color)
-                     (-> "Can only create colors from rgb three-tuples or keywords."
-                         (ex-info {:given color})
-                         (throw)))))
+(letfn [(if-color-not-found [_ _ color]
+          (if (and (coll? color) (= (count color) 3))
+            (apply rgb-color color)
+            (-> "Can only create colors from rgb three-tuples or keywords."
+                (ex-info {:given color})
+                (throw))))]
+  (coerce-from-map :color colors if-color-not-found)
+  (coerce-from-map :fill-background-color colors if-color-not-found)
+  (coerce-from-map :fill-foreground-color colors if-color-not-found)
+  (coerce-from-map :left-border-color colors if-color-not-found)
+  (coerce-from-map :right-border-color colors if-color-not-found)
+  (coerce-from-map :top-border-color colors if-color-not-found)
+  (coerce-from-map :bottom-border-color colors if-color-not-found))
 
 (defmethod coerce-to-obj :font
   [^XSSFWorkbook wb _ font-attrs]
@@ -272,22 +302,6 @@
     (if (map? cell) cell {:value cell})
     :style (fn [s] (if-not s style (merge-all s style)))))
 
-(comment
-  ;; If one wanted to visualize all of the nested setters & POI objects...
-  (let [param-type (fn [setter] (resolve (first (:parameter-types setter))))
-        is-setter? (fn [{:keys [name parameter-types]}]
-                     (and (string/starts-with? (str name) "set")
-                          (= 1 (count parameter-types))))
-        setters (fn [class]
-                  (filter
-                    is-setter?
-                    (#'clojure.reflect/declared-methods class)))
-        cell-style (first (filter #(= 'setCellStyle (:name %)) (setters XSSFCell)))]
-    ;; Keep in mind that this requires $ apt-get install graphviz
-    (rhizome.viz/view-tree
-      #(instance? Class (param-type %)) (comp setters param-type) cell-style
-      :node->descriptor #(->{:label ((juxt :name :parameter-types) %)}))))
-
 ;;; Default table formatting functions to produce styles
 
 (defn best-guess-row-format
@@ -312,7 +326,7 @@
 
 (def default-header-style
   (constantly
-    {:border-bottom BorderStyle/THIN :font {:bold true}}))
+    {:border-bottom :thin :font {:bold true}}))
 
 ;;; Default tree formatting functions to produce styles
 
@@ -325,3 +339,19 @@
 (def default-tree-total-formatters
   {0 {:font {:bold true} :border-top :medium}
    1 {:border-top :thin :border-bottom :thin}})
+
+(defn example
+  "If one wanted to visualize all of the nested setters & POI objects...
+  Keep in mind that this requires $ apt-get install graphviz"
+  []
+  (let [param-type (fn [setter] (resolve (first (:parameter-types setter))))
+        is-setter? (fn [{:keys [name parameter-types]}]
+                     (and (string/starts-with? (str name) "set")
+                          (= 1 (count parameter-types))))
+        setters (fn [class]
+                  (filter is-setter? (#'reflect/declared-methods class)))
+        cell-style (first
+                     (filter #(= 'setCellStyle (:name %)) (setters XSSFCell)))]
+    (viz/view-tree
+      #(instance? Class (param-type %)) (comp setters param-type) cell-style
+      :node->descriptor #(->{:label ((juxt :name :parameter-types) %)}))))
