@@ -184,10 +184,15 @@
   (XSSFColor. (byte-array [r g b]) (DefaultIndexedColorMap.)))
 
 (def colors
-  {:gray   (rgb-color 232 232 232)
-   :blue   (rgb-color 204 255 255)
+  {:white  (rgb-color 255 255 255)
+   :red    (rgb-color 255 0 0)
+   :orange (rgb-color 255 127 0)
+   :yellow (rgb-color 250 255 204)
    :green  (rgb-color 221 255 204)
-   :yellow (rgb-color 250 255 204)})
+   :blue   (rgb-color 204 255 255)
+   :purple (rgb-color 200 0 255)
+   :gray   (rgb-color 232 232 232)
+   :black  (rgb-color 0 0 0)})
 
 (coerce-from-map :alignment alignments)
 (coerce-from-map :underline underlines)
