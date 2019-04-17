@@ -1,14 +1,43 @@
-## excel-clj
+# excel-clj
 
-Purpose: declarative creation of Excel spreadsheets / PDFs with Clojure from 
-higher level abstractions (tree, table) or via a manual grid specification, with
-boilerplate-free common sense styling.
+Declarative generation of Excel documents & PDFs with Clojure from higher level 
+abstractions (tree, table) or via a manual grid specification, with boilerplate-free 
+common sense styling.
+
+[CHANGELOG](CHANGELOG.md) | Uses [Break Versioning](https://github.com/ptaoussanis/encore/blob/master/BREAK-VERSIONING.md)
+
+Lein:
+```
+[org.clojars.mjdowney/excel-clj "1.0.0"]
+```
+
+- [Getting Started](#getting-started)
+    - [Tables](#tables)
+    - [Trees](#trees)
+    - [PDF Generation](#pdf-generation)
+    - [Table Styling](#table-styling)
+    - [Tree Styling](#tree-styling)
+    - [Manual Styling](#manual-styling)
+    - [Grid Format & Cell Merging](#grid-format-&-cell-merging)
+- [Roadmap](#roadmap)
+    - [Tree flexibility](#roadmap)
+    - [Templates](#roadmap)
+    - [Reading & editing](#roadmap)
+    - [Formulas](#roadmap)
+
+## Getting Started
 
 All of the namespaces have an `example` function at the end; they're intended to
 be browsable and easy to interact with to glean information beyond what's here
 in a the readme.
 
 Start by skimming this and then browsing [core.clj](src/excel_clj/core.clj).
+
+Tests are run with
+
+```clojure
+lein test
+```
 
 ### Tables
 Though Excel is much more than a program for designing tabular layouts, a table
@@ -157,3 +186,62 @@ that includes optional style data / cell merging instructions.
 ```
 
 ![A spreadsheet with a merged title](resources/manual-grid.png)
+
+## Roadmap
+- Tree flexibility. [tree.clj](src/excel_clj/tree.clj) should be able to work
+  with any data shape given the same functions as [`clojure.core/tree-seq`](https://clojuredocs.org/clojure.core/tree-seq).
+  Additionally, it should provide hooks for custom ways to aggregate columns 
+  (instead of expecting `Number` data and summing it) and whether or not to display
+  sub-category level totals vs just grand totals.
+
+- Templates! There's no reason to do all of the styling work programmatically. 
+  We should be able to download [some cool Google Sheets template](https://docs.google.com/spreadsheets/u/0/?usp=mkt_sheets_tpl)
+  as an `.xlsx` file, edit it to indicate where `excel-clj` should fill in tables,
+  trees, or individual cells, and then write code that reads the template from a
+  `resources/some-template.xlsx` and produces a filled in sheet.
+  
+  Not at all a fully formed spec yet, but something along the lines of filling 
+  in the following sheet:
+  
+  ![Template draft](resources/template-draft.png)
+  
+  Using some simple data:
+  ```clojure 
+  {:title           "The Title"
+   :start-date      (Date. (- (System/currentTimeMillis) (* 1000 60 60 24 7)))
+   :end-date        (Date.)
+   :employee-name   "Foo"
+   :employee-id     "Bar"
+   :manager-name    "Baz"
+   :department      "Accounting"
+   :expense-purpose "Trip"
+   :tbl [{:date (Date.) :category "Cat A" :desc "Misc expenses" 
+          :notes "" :amount 500.00M}
+         {:date (Date.) :category "Cat B" :desc "Other expenses" 
+          :notes "" :amount 100.00M}]}
+  ```
+  
+  To get the following result:
+  
+  ![Filled in template draft](resources/filled-template-draft.png)
+
+- Reading & editing existing spradsheets. This should go hand in hand with 
+  template generation.
+  
+- Formulas! We don't have them. I'm envisioning a syntax where a table column
+  or a cell contain a `:value` of `(excel/formula ...)`. The interior of the
+  formula could allow relative coordinate generation with the placeholders `*x*` 
+  and `*y*` — which could be operated on to find relative coordinates (e.g. 
+  `(- *x* 2)`) — and would then be replaced during rendering with the column and 
+  row. E.g. 
+  
+  ```clojure
+  (def table-data
+    [{"Foos" 10, "Bars" 5, "Total" (excel/formula "=(- *x* 2)*y* + (- *x* 1)*y*")}
+     {"Foos" 12, "Bars" 8, "Total" (excel/formula "=(- *x* 2)*y* + (- *x* 1)*y*")}])
+  ```
+  
+  would result in the formulas being rendered in the C column after the title 
+  row, the first being `=A1+B1` and the second being `=A2+B2`.
+  
+- Java wrapper? Uncertain if this would be useful / how it would look.
