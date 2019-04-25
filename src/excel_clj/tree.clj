@@ -1,6 +1,6 @@
 (ns
-  ^{:doc "A tree for Excel (accounting) data. The format is [Label [Children]]
-    for nodes and [Label {:column :value}] for leaves.
+  ^{:doc "A key-value tree for Excel (accounting) data. The format is
+    [Label [Children]] for nodes and [Label {:column :value}] for leaves.
 
     For any tree, t, the value function returns the sum of the {:column :value}
     attributes under the root.
@@ -174,36 +174,73 @@
   of at least this number."
   2)
 
-(defn render-table
-  "Render the trees into a 'table': a coll of maps, each map containing :depth
-  (distance from the root) and :label (the first part of the [Label [Children]]
-  node vector) attributes plus the (attrs) for the node/leaf."
-  [& trees]
-  ;; All the attr keys plus :depth (root is the max depth) and :label
-  (loop [ts trees rendered []]
+(defn tree->raw-table
+  "Render the trees into a 'table': a coll of maps, each map containing ::depth
+  (distance from the root), ::label (the first part of the [Label [Children]]
+  node vector), and ::total? attributes plus the (attrs) for the node/leaf.
+  
+  The intention being that you can then use the information in the namespace
+  qualified attributes to render the tree items into a line format that suits
+  you."
+  [trees & {:keys [sum-totals?] :or {sum-totals? true}}]
+  ;; All the attr keys plus ::depth (root is the max depth) and ::label
+  (loop [ts trees, rendered []]
     (if-let [t (first ts)]
       (if (map? t) ;; It's an already processed line, just add it and move on
         (recur (rest ts) (conj rendered t))
         (let [t-depth (nth t 2 0)]
           (if (leaf? t) ;; It's a leaf, so display with all of its attributes
             (let [line (merge
-                         {:depth (max *min-leaf-depth* t-depth)
-                          :label (label t)}
+                         {::depth (max *min-leaf-depth* t-depth)
+                          ::label (label t)}
                          (value t))]
               (recur (rest ts) (conj rendered line)))
             ;; It's a node, so add a header, display its children, then a total
             (let [;; w/ depth
                   children' (mapv #(assoc % 2 (inc t-depth)) (children t))
-                  total  (merge {:depth t-depth :label ""} (value t))
-                  ;; Only one child and it's a leaf, no need for a total
+                  total (when sum-totals?
+                          (merge {::depth t-depth ::label "" ::total? true} (value t)))
+                  ;; Only one child and it's a leaf, no need for a total even if
+                  ;; its enabled
                   show-total? (not (and (= (count (children t)) 1)
                                         (leaf? (first (children t)))))
-                  header {:depth t-depth :label (label t)}
+                  header {::depth t-depth ::label (label t)}
                   next-lines (into
-                               (cond-> children' show-total? (conj total))
+                               (cond-> children' (and total show-total?) (conj total))
                                (rest ts))]
               (recur next-lines (conj rendered header))))))
       rendered)))
+
+(defn raw-table->rendered
+  "Given table items with a qualified ::depth and ::label keys, render a table
+  string indenting labels with ::depth and keeping other keys as column labels."
+  [table-items & {:keys [indent-width] :or {indent-width 2}}]
+  (let [indent-str (apply str (repeat indent-width " "))]
+    (letfn [(fmt [line-item]
+              (-> line-item
+                  (dissoc ::depth ::label ::total?)
+                  (assoc "" (str (apply str (repeat (::depth line-item) indent-str))
+                                 (::label line-item)))))]
+      (map fmt table-items))))
+
+(defn print-table
+  "Display tabular data in a way that preserves label indentation in a way the
+  clojure.pprint/print-table does not."
+  ([xs]
+   (print-table xs {}))
+  ([xs {:keys [ks empty-str pad-width]}]
+   (let [ks (or ks (sequence (comp (mapcat keys) (distinct)) xs))
+         empty-str (or empty-str "-")
+         pad-width (or pad-width 2)]
+     (let [len (fn [k]
+                 (let [len' #(or (some-> (% k) str count) 0)]
+                   (+ pad-width (transduce (map len') (completing max) 0 (conj xs {k k})))))
+           header (into {} (map (juxt identity identity)) ks)
+           ks' (mapv (juxt identity len) ks)]
+       (doseq [x (cons header xs)]
+         (doseq [[k l] ks']
+           (print (format (str "%-" l "s") (get x k empty-str))))
+         (println ""))))))
 
 (defn headers
   "Return a vector of headers in the tree, with any headers given in first-hs
@@ -213,34 +250,6 @@
         all-headers (set (keys (value tree)))
         other-headers (apply disj all-headers all-specified)]
     (vec (filter all-headers (concat first-hs other-headers last-hs)))))
-
-(defn tbl
-  "Display tabular data in a way that preserves label indentation in a way the
-  clojure.pprint/print-table does not."
-  ([xs]
-   (tbl
-     (sequence (comp (mapcat keys) (distinct)) xs)
-     xs))
-  ([ks xs]
-   (let [pad 2
-         len (fn [k]
-               (let [len' #(or (some-> (% k) str count) 0)]
-                 (+ pad (transduce (map len') (completing max) 0 xs))))
-         header (into {} (map (juxt identity identity)) ks)
-         ks' (mapv (juxt identity len) ks)]
-     (doseq [x (cons header xs)]
-       (doseq [[k l] ks']
-         (print (format (str "%-" l "s") (get x k "-"))))
-       (println "")))))
-
-(defn render-tbl-string
-  [& trees]
-  (letfn [(fmt [{:keys [depth label] :as line}]
-            (-> line
-                (dissoc :depth :label)
-                (assoc "" (str (apply str (repeat depth "  ")) label))))]
-    (with-out-str
-      (tbl (map fmt (apply render-table trees))))))
 
 (def mock-balance-sheet
   (vector
@@ -261,7 +270,7 @@
 
 (defn example []
   ;; Render the tree as a table
-  (println (apply render-tbl-string mock-balance-sheet))
+  (-> mock-balance-sheet tree->raw-table raw-table->rendered print-table)
 
   ;; Do addition or subtraction with trees using the tree-math macro
   (let [[assets [_ [liabilities equity]]] mock-balance-sheet]
@@ -302,6 +311,7 @@
 (comment
   ;; Or you can visualize with ztellman/rhizome
   ;; Keep in mind that this requires $ apt-get install graphviz
+  (use '(rhizome viz))
   (rhizome.viz/view-tree
     (complement leaf?) children (second mock-balance-sheet)
     :edge->descriptor (fn [x y] (when (leaf? y) {:label (label y)}))

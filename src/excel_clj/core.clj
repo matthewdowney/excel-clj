@@ -204,7 +204,7 @@
         :or {formatters style/default-tree-formatters
              total-formatters style/default-tree-total-formatters}}]
   (try
-    (let [tabular (apply tree/render-table (second t))
+    (let [tabular (tree/tree->raw-table (second t))
           fmt-or-max (fn [fs n]
                        (or (get fs n) (second (apply max-key first fs))))
           all-colls (or headers
