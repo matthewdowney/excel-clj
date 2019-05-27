@@ -10,8 +10,8 @@
            (value t))
     ; => {:usd 15M :mxn 7M}
 
-    See the example at the bottom of the ns for some code to render a balance
-    sheet."
+    For some example code, see the functions `balance-sheet-example` or
+    `tree-table-example` in this namespace."
     :author "Matthew Downey"} excel-clj.tree
   (:require
     [clojure.string :as string]))
@@ -78,7 +78,9 @@
                  [node (mapv #(trampoline traverse %) (children node))])))]
      (trampoline traverse root))))
 
-(defn force-map [tree-or-map]
+(defn force-map
+  "Returns the argument if it's a map, otherwise calls `value` on the arg."
+  [tree-or-map]
   (if (map? tree-or-map)
     tree-or-map
     (value tree-or-map)))
@@ -268,7 +270,7 @@
       ["Equity"
        [["Common Stock" {2018 102M, 2017 80M}]]]]]))
 
-(defn example []
+(defn balance-sheet-example []
   ;; Render the tree as a table
   (-> mock-balance-sheet tree->raw-table raw-table->rendered print-table)
 
@@ -316,3 +318,83 @@
     (complement leaf?) children (second mock-balance-sheet)
     :edge->descriptor (fn [x y] (when (leaf? y) {:label (label y)}))
     :node->descriptor #(->{:label (if (leaf? %) (value %) [(label %) (value %)])})))
+
+;;; Coerce a tabular format to a tree format
+
+(defn ordered-group-by
+  "Like `group-by`, but returns a [k [v]] seq and doesn't rearrange values except
+  to include them in a group. Probably less performant because it has to search
+  the built up seq to find the proper key-value store."
+  [f xs]
+  (letfn [(update-or-add [xs pred update default]
+            (loop [xs' [], xs xs]
+              (if-let [x (first xs)]
+                (if (pred x)
+                  (into xs' (cons (update x) (rest xs)))
+                  (recur (conj xs' x) (rest xs)))
+                (conj xs' default))))
+          (assign-to-group [groups x]
+            (let [group (f x)]
+              (update-or-add
+                groups
+                #(= (first %) group)
+                #(update % 1 conj x)
+                [group [x]])))]
+    (reduce assign-to-group [] xs)))
+
+(defn table->trees
+  "Collapse a tabular collection of maps into a collection of trees, where the
+  label at each level of the tree is given by each of `node-fns` and the columns
+  displayed are the result of `format-leaf`, which returns a tabular map.
+
+  See the (comment ...) block under this method declaration for an example."
+  [tabular format-leaf & node-fns]
+  (letfn [(inner-build
+            ([root items]
+             (vector
+               root
+               (if (= (count items) 1)
+                 (format-leaf (first items))
+                 (map #(->["" (format-leaf %)]) items))))
+            ([root items below-root & subsequent]
+             (vector
+               root
+               (->> (ordered-group-by below-root items)
+                    (mapv (fn [[next-root next-items]]
+                            (apply inner-build next-root next-items subsequent)))))))]
+    (second (apply inner-build "" tabular node-fns))))
+
+(defn tree-table-example []
+  (-> (table->trees
+        ;; The table we'll convert to a tree
+        [{:from "MXN" :to "AUD" :on "BrokerA" :return (rand)}
+         {:from "MXN" :to "USD" :on "BrokerB" :return (rand)}
+         {:from "MXN" :to "JPY" :on "BrokerB" :return (rand)}
+         {:from "USD" :to "AUD" :on "BrokerA" :return (rand)}]
+
+        ;; The data fields we want to look at
+        #(-> {"Return"            (format "%.2f%%" (:return %))
+              "Trade Description" (format "%s -> %s" (:from %) (:to %))})
+
+        ;; The top level label -- split by above/below 50% return
+        #(if (> (:return %) 0.5) "High Return" "Some Return")
+
+        ;; Then split by which currency we start with
+        #(str "Trading " (:from %))
+
+        ;; Finally, by broker
+        :on)
+      (tree->raw-table :sum-totals? false)
+      (raw-table->rendered :indent-width 5)
+      (print-table {:empty-str "" :pad-width 5})))
+
+; =>                       Return     Trade Description
+;       High Return
+;       Trading MXN
+;              BrokerA     0.70%      MXN -> AUD
+;              BrokerB
+;                          0.68%      MXN -> USD
+;                          0.93%      MXN -> JPY
+;     Some Return
+;         Trading USD
+;              BrokerA     0.20%      USD -> AUD"
