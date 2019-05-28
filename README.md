@@ -8,7 +8,7 @@ common sense styling.
 
 Lein:
 ```
-[org.clojars.mjdowney/excel-clj "1.0.0"]
+[org.clojars.mjdowney/excel-clj "1.1.0"]
 ```
 
 - [Getting Started](#getting-started)
@@ -91,6 +91,30 @@ the balances corresponding to an account hierarchy.
 ```
 
 ![An excel sheet is opened](resources/quick-open-tree.png)
+
+Trees are pretty flexible — the only requirement that we impose is that their
+leaves have the format `[string-label, map-of-numbers]`. We construct trees 
+using the same arguments we'd give to `clojure.core/tree-seq`, plus a walk 
+function. 
+
+We could make a tree for some part of our file system for example:
+
+```clojure
+(require '[excel-clj.tree :as tree] '[clojure.java.io :as io])
+=> nil
+
+(let [src-tree
+      (tree/walk
+        (fn [f xs]
+          (if-not (seq xs)
+            [(.getName f) {:size (.length f)}]
+            [(str (.getName f) "/") xs]))
+        #(.isDirectory %) #(.listFiles %) (io/file "."))]
+  (excel/quick-open 
+    {"Source Tree" (excel/tree ["Source" [src-tree]] :data-format :number)}))
+```
+
+![An excel sheet is opened](resources/file-tree.png)
 
 
 ### PDF Generation
@@ -188,11 +212,6 @@ that includes optional style data / cell merging instructions.
 ![A spreadsheet with a merged title](resources/manual-grid.png)
 
 ## Roadmap
-- Tree flexibility. [tree.clj](src/excel_clj/tree.clj) should be able to work
-  with any data shape given the same functions as [`clojure.core/tree-seq`](https://clojuredocs.org/clojure.core/tree-seq).
-  Additionally, it should provide hooks for custom ways to aggregate columns 
-  (instead of expecting `Number` data and summing it) and whether or not to display
-  sub-category level totals vs just grand totals.
 
 - Templates! There's no reason to do all of the styling work programmatically. 
   We should be able to download [some cool Google Sheets template](https://docs.google.com/spreadsheets/u/0/?usp=mkt_sheets_tpl)
@@ -225,7 +244,7 @@ that includes optional style data / cell merging instructions.
   
   ![Filled in template draft](resources/filled-template-draft.png)
 
-- Reading & editing existing spradsheets. This should go hand in hand with 
+- Reading & editing existing spreadsheets. This should go hand in hand with 
   template generation.
   
 - Formulas! We don't have them. I'm envisioning a syntax where a table column

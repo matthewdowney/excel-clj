@@ -1,7 +1,6 @@
 (ns excel-clj.core-test
   (:require [clojure.test :refer :all]
-            [excel-clj.core :refer :all]
-            [excel-clj.tree :as tree]))
+            [excel-clj.core :refer :all]))
 
 (deftest table-test
   (let [data [{"Date" "2018-01-01" "% Return" 0.05M "USD" 1500.5005M}
@@ -30,4 +29,3 @@
            ["" 5 2]
            ["Tree 2" nil nil]
            ["Child" -2 -1]]))))
-

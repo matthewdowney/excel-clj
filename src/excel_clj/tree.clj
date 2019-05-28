@@ -1,24 +1,17 @@
 (ns
-  ^{:doc "A tree for Excel (accounting) data. The format is [Label [Children]]
-    for nodes and [Label {:column :value}] for leaves.
+  ^{:doc "A key-value tree for Excel (accounting) data. The format is
+    [Label [Children]] for nodes and [Label {:column :value}] for leaves.
 
-    For any tree, t, the value function returns the sum of the {:column :value}
-    attributes under the root.
-         (let [t [:everything
-                  [[:child-1 {:usd 10M :mxn 10M}]
-                   [:child-2 {:usd 5M :mxn -3M}]]]]
-           (value t))
-    ; => {:usd 15M :mxn 7M}
-
-    See the example at the bottom of the ns for some code to render a balance
-    sheet."
+    For some example code, check out the various (comment ...) blocks in this
+    namespace."
     :author "Matthew Downey"} excel-clj.tree
-  (:require
-    [clojure.string :as string]))
+  (:require [clojure.string :as string]
+            [clojure.walk :as cwalk]))
 
 ;;; Utilities for vector math
 
 (defn sum-maps
+  "Similar to (merge-with + ...) but treats nil keys as 0 values."
   ([m1 m2] ;; nil == 0
    (let [all-keys (into #{} (concat (keys m1) (keys m2)))]
      (into {} (map (fn [k] [k (+ (or (m1 k) 0) (or (m2 k) 0))])) all-keys)))
@@ -27,9 +20,17 @@
 
 (defn negate-map
   [m]
-  (into {} (map (fn [[k v]] [k (* -1M (or v 0))])) m))
+  (into {} (map (fn [[k v]] [k (* -1 (or v 0))])) m))
 
 (defn subtract-maps
+  "Very important difference from (merge-with - ...):
+
+    (merge-with - {:foo 10} {:foo 5 :bar 5})
+    ; => {:foo 5, :bar 5}
+
+    (subtract-maps {:foo 10} {:foo 5 :bar 5})
+    ; => {:foo 5, :bar -5}
+  "
   ([m1 m2]
    (sum-maps m1 (negate-map m2)))
   ([m1 m2 & ms]
@@ -53,101 +54,68 @@
     (second node)))
 
 (defn value
-  "If the node is a leaf, returns the map of values for the leaf. Otherwise
-  returns the sum of that value map for all children under the node."
-  [node]
-  (if-not (leaf? node)
-    (loop [children' (children node) summed {}]
-      (if-let [nxt (first children')]
-        (if (leaf? nxt)
-          (recur (rest children') (sum-maps summed (second nxt)))
-          (recur (concat (rest children') (children nxt)) summed))
-        summed))
-    (second node)))
+  "Aggregate all of the leaf maps in `tree` by reducing over them with
+  `reducing-fn` (defaults to summing maps together). If given a single
+  map, returns the map."
+  ([tree]
+   (value tree sum-maps))
+  ([tree reducing-fn]
+   (cond
+     (map? tree) tree
+     (leaf? tree) (second tree)
+     :else
+     (transduce
+       (comp (filter leaf?) (map second))
+       (completing reducing-fn)
+       {}
+       (tree-seq (complement leaf?) children tree)))))
 
-(defn seq-tree
-  "The opposite of core/tree-seq: construct a tree given the root and traversal
-  functions."
-  ([branch? children root]
-   (seq-tree branch? children root identity))
-  ([branch? children root leaf-factory]
-   (letfn [(traverse [node]
-             (if-not (branch? node)
-               (leaf-factory node)
-               (fn []
-                 [node (mapv #(trampoline traverse %) (children node))])))]
-     (trampoline traverse root))))
-
-(defn force-map [tree-or-map]
-  (if (map? tree-or-map)
-    tree-or-map
-    (value tree-or-map)))
-
-(defmacro axf
-  "Sort of a composition of f with xf, except that xf is applied to _each_
-  argument of f. I.e. f's arguments are transformed by the function xf.
-
-  E.g. 'composing' compare with Math/abs to compare absolute values of the
-  numbers:
-    (defn abs-compare [n n']
-      (axf compare Math/abs n n'))
-
-  Or comparing two java.util.Date objects:
-    ;; This won't work...
-    (< (Date.) (Date.))
-    ; => ClassCastException java.util.Date cannot be cast to java.lang.Number
-
-    ;; But this will
-    (axf < .getTime (Date.) (Date.))
-    ; => false"
-  [f xf & args]
-  (let [xformed (map #(-> `(~xf ~%)) args)]
-    `(~f ~@xformed)))
-
-(defmacro add-trees [& trees]
-  `(axf sum-maps force-map ~@trees))
-
-(defmacro subtract-trees [& trees]
-  `(axf subtract-maps force-map ~@trees))
-
-(defmacro tree-math
+(defmacro math
   "Any calls to + or - within form are modified to work on trees and tree
-  values."
+  values (maps of numbers)."
   [form]
-  (clojure.walk/postwalk-replace
-    {'+ `add-trees, '- `subtract-trees}
+  (cwalk/postwalk
+    (fn [form]
+      (if (and (sequential? form) (#{'+ '-} (first form)))
+        (let [replace-with ({'+ `sum-maps '- `subtract-maps} (first form))]
+          (cons replace-with (map (fn [tree-expr] (list `value tree-expr)) (rest form))))
+        form))
     form))
 
-;;; Modify a tree by mapping over its nodes and reconstructing
+;;; Utilities for constructing & walking / modifying trees
 
-(defn map-nodes
-  "Map f across all [label attrs] and [label [child]] nodes."
-  [tree f]
-  (letfn [(map' [node]
-            (if (leaf? node)
-              (f node)
-              (fn []
-                (let [recurred (mapv #(trampoline map' %) (children node))
-                      children' (or
-                                  (not-empty (vec (filter some? recurred)))
-                                  {})]
-                  (f [(label node) children'])))))]
-    (trampoline map' tree)))
+(defn walk
+  "Map f across all [label attrs] and [label [child]] nodes, depth-first.
 
-(defn map-leaves
-  "Map f across all leaf nodes."
-  [tree f]
-  (map-nodes tree (fn [node] (cond-> node (leaf? node) f))))
+  Use with the same `branch?` and `children` functions that you'd give to
+  `tree-seq` in order to build a tree of the format used by this namespace."
+  ([f tree]
+   (walk f (complement leaf?) children tree))
+  ([f branch? children root]
+   (let [walk (fn walk [node]
+                (if (branch? node)
+                  (f node (mapv walk (children node)))
+                  (f node [])))]
+     (walk root))))
 
-(defn map-leaf-vals
-  "Map f across the value map of all leaves."
-  [tree f]
-  (map-leaves tree (fn [[label attrs]] [label (f attrs)])))
+(comment
+  "For example, create a file tree with nodes listing the :size of each file."
+  (walk
+    (fn [f xs]
+      (if-not (seq xs)
+        [(.getName f) {:size (.length f)}]
+        [(.getName f) xs]))
+    #(.isDirectory %) #(.listFiles %) (clojure.java.io/file ".")))
 
 (defn negate-tree
   "Negate all of the numbers in a tree."
   [tree]
-  (map-leaf-vals tree negate-map))
+  (walk
+    (fn [node children]
+      (if-not (seq children)
+        [(label node) (negate-map (value node))]
+        [(label node) children]))
+    tree))
 
 (defn shallow
   "'Shallow' the tree one level by getting rid of the root and combining its
@@ -169,41 +137,92 @@
 
 ;;; Coerce a tree format to a tabular format
 
-(def ^:dynamic *min-leaf-depth*
-  "For formatting purposes, set this to artificially make a leaf sit at a depth
-  of at least this number."
-  2)
+(defn accounting-table
+  "Render a coll of trees into a coll of tabular maps, where leaf values are
+  listed on the same line and aggregated below into a total (default aggregation
+  is addition).
 
-(defn render-table
-  "Render the trees into a 'table': a coll of maps, each map containing :depth
-  (distance from the root) and :label (the first part of the [Label [Children]]
-  node vector) attributes plus the (attrs) for the node/leaf."
-  [& trees]
-  ;; All the attr keys plus :depth (root is the max depth) and :label
-  (loop [ts trees rendered []]
-    (if-let [t (first ts)]
-      (if (map? t) ;; It's an already processed line, just add it and move on
-        (recur (rest ts) (conj rendered t))
-        (let [t-depth (nth t 2 0)]
-          (if (leaf? t) ;; It's a leaf, so display with all of its attributes
-            (let [line (merge
-                         {:depth (max *min-leaf-depth* t-depth)
-                          :label (label t)}
-                         (value t))]
-              (recur (rest ts) (conj rendered line)))
-            ;; It's a node, so add a header, display its children, then a total
-            (let [;; w/ depth
-                  children' (mapv #(assoc % 2 (inc t-depth)) (children t))
-                  total  (merge {:depth t-depth :label ""} (value t))
-                  ;; Only one child and it's a leaf, no need for a total
-                  show-total? (not (and (= (count (children t)) 1)
-                                        (leaf? (first (children t)))))
-                  header {:depth t-depth :label (label t)}
-                  next-lines (into
-                               (cond-> children' show-total? (conj total))
-                               (rest ts))]
-              (recur next-lines (conj rendered header))))))
-      rendered)))
+  Each item in the coll is a map with ::depth, ::label, ::header?, and ::total?
+  attributes, in addition to the attributes in the leaves.
+
+  If an `:aggregate-with` function is provided, total lines are constructed by
+  reducing that function over sub-leaves. Defaults to a reducing with `sum-maps`."
+  [trees & {:keys [aggregate-with min-leaf-depth] :or {aggregate-with sum-maps
+                                                       min-leaf-depth 2}}]
+  (->>
+    trees
+    (mapcat
+      (fn [tree]
+        (walk
+          (fn [node children]
+            (if-let [children (seq (flatten children))]
+              (concat
+                ;; First we show the header
+                [{::depth 0 ::label (label node) ::header? true}]
+                ;; Then the children & their values
+                (mapv #(update % ::depth inc) children)
+                ;; And finally an aggregation if there are multiple header children
+                ;; or any leaf children
+                (when (or (> (count (group-by :depth children)) 2) (not (::header? (first children))))
+                  [(merge {::depth 0 ::label "" ::total? true} (value node aggregate-with))]))
+              ;; A leaf just has its label & value attrs. The depth is inc'd by each
+              ;; parent back to the root, so it does not stay at 0.
+              (merge {::depth 0 ::label (label node)} (value node aggregate-with))))
+          tree)))
+    (map
+      (fn [table-row]
+        ;; not a leaf
+        (if (or (::header? table-row) (::total? table-row) (not (::depth table-row)))
+          table-row
+          (update table-row ::depth max min-leaf-depth))))))
+
+(defn unaggregated-table
+  "Similar to account-table, but makes no attempt to aggregate non-leaf headers,
+  and accepts a coll of trees."
+  [trees]
+  (mapcat
+    (fn [tree]
+      (walk
+        (fn [node children]
+          (if-let [children (seq (flatten children))]
+            (into [{::depth 0 ::label (label node) ::header? true}] (map #(update % ::depth inc)) children)
+            (merge {::depth 0 ::label (label node)} (value node))))
+        tree))
+    trees))
+
+(defn render
+  "Given a coll of table items with a qualified ::depth and ::label keys, return
+  a table items indenting labels with ::depth and keeping other keys as column
+  labels, removing namespace qualified keywords.
+
+  (Used for printing in a string, rather than with Excel.)"
+  [table-items & {:keys [indent-width] :or {indent-width 2}}]
+  (let [indent-str (apply str (repeat indent-width " "))]
+    (letfn [(fmt [line-item]
+              (-> line-item
+                  (dissoc ::depth ::label ::total? ::header?)
+                  (assoc "" (str (apply str (repeat (::depth line-item) indent-str))
+                                 (::label line-item)))))]
+      (map fmt table-items))))
+
+(defn print-table
+  "Display tabular data in a way that preserves label indentation in a way the
+  clojure.pprint/print-table does not."
+  ([xs]
+   (print-table xs {}))
+  ([xs {:keys [ks empty-str pad-width]}]
+   (let [ks (or ks (sequence (comp (mapcat keys) (distinct)) xs))
+         empty-str (or empty-str "-")
+         pad-width (or pad-width 2)]
+     (let [len (fn [k]
+                 (let [len' #(or (some-> (% k) str count) 0)]
+                   (+ pad-width (transduce (map len') (completing max) 0 (conj xs {k k})))))
+           header (into {} (map (juxt identity identity)) ks)
+           ks' (mapv (juxt identity len) ks)]
+       (doseq [x (cons header xs)]
+         (doseq [[k l] ks']
+           (print (format (str "%-" l "s") (get x k empty-str))))
+         (println ""))))))
 
 (defn headers
   "Return a vector of headers in the tree, with any headers given in first-hs
@@ -213,34 +232,6 @@
         all-headers (set (keys (value tree)))
         other-headers (apply disj all-headers all-specified)]
     (vec (filter all-headers (concat first-hs other-headers last-hs)))))
-
-(defn tbl
-  "Display tabular data in a way that preserves label indentation in a way the
-  clojure.pprint/print-table does not."
-  ([xs]
-   (tbl
-     (sequence (comp (mapcat keys) (distinct)) xs)
-     xs))
-  ([ks xs]
-   (let [pad 2
-         len (fn [k]
-               (let [len' #(or (some-> (% k) str count) 0)]
-                 (+ pad (transduce (map len') (completing max) 0 xs))))
-         header (into {} (map (juxt identity identity)) ks)
-         ks' (mapv (juxt identity len) ks)]
-     (doseq [x (cons header xs)]
-       (doseq [[k l] ks']
-         (print (format (str "%-" l "s") (get x k "-"))))
-       (println "")))))
-
-(defn render-tbl-string
-  [& trees]
-  (letfn [(fmt [{:keys [depth label] :as line}]
-            (-> line
-                (dissoc :depth :label)
-                (assoc "" (str (apply str (repeat depth "  ")) label))))]
-    (with-out-str
-      (tbl (map fmt (apply render-table trees))))))
 
 (def mock-balance-sheet
   (vector
@@ -259,16 +250,16 @@
       ["Equity"
        [["Common Stock" {2018 102M, 2017 80M}]]]]]))
 
-(defn example []
+(comment
   ;; Render the tree as a table
-  (println (apply render-tbl-string mock-balance-sheet))
+  (-> mock-balance-sheet accounting-table render print-table)
 
   ;; Do addition or subtraction with trees using the tree-math macro
   (let [[assets [_ [liabilities equity]]] mock-balance-sheet]
-    (println "Assets - Liabilities =" (tree-math (- assets liabilities)))
+    (println "Assets - Liabilities =" (math (- assets liabilities)))
     (println "Equity =" (value equity))
     (println)
-    (println "Equity + Liabilities =" (tree-math (+ equity liabilities)))
+    (println "Equity + Liabilities =" (math (+ equity liabilities)))
     (println "Assets =" (value assets))))
 ; =>
 ;                                     2018 2017
@@ -302,7 +293,88 @@
 (comment
   ;; Or you can visualize with ztellman/rhizome
   ;; Keep in mind that this requires $ apt-get install graphviz
+  (use '(rhizome viz))
   (rhizome.viz/view-tree
     (complement leaf?) children (second mock-balance-sheet)
     :edge->descriptor (fn [x y] (when (leaf? y) {:label (label y)}))
     :node->descriptor #(->{:label (if (leaf? %) (value %) [(label %) (value %)])})))
+
+;;; Coerce a tabular format to a tree format
+
+(defn ordered-group-by
+  "Like `group-by`, but returns a [k [v]] seq and doesn't rearrange values except
+  to include them in a group. Probably less performant because it has to search
+  the built up seq to find the proper key-value store."
+  [f xs]
+  (letfn [(update-or-add [xs pred update default]
+            (loop [xs' [], xs xs]
+              (if-let [x (first xs)]
+                (if (pred x)
+                  (into xs' (cons (update x) (rest xs)))
+                  (recur (conj xs' x) (rest xs)))
+                (conj xs' default))))
+          (assign-to-group [groups x]
+            (let [group (f x)]
+              (update-or-add
+                groups
+                #(= (first %) group)
+                #(update % 1 conj x)
+                [group [x]])))]
+    (reduce assign-to-group [] xs)))
+
+(defn table->trees
+  "Collapse a tabular collection of maps into a collection of trees, where the
+  label at each level of the tree is given by each of `node-fns` and the columns
+  displayed are the result of `format-leaf`, which returns a tabular map.
+
+  See the (comment ...) block under this method declaration for an example."
+  [tabular format-leaf & node-fns]
+  (letfn [(inner-build
+            ([root items]
+             (vector
+               root
+               (if (= (count items) 1)
+                 (format-leaf (first items))
+                 (map #(->["" (format-leaf %)]) items))))
+            ([root items below-root & subsequent]
+             (vector
+               root
+               (->> (ordered-group-by below-root items)
+                    (mapv (fn [[next-root next-items]]
+                            (apply inner-build next-root next-items subsequent)))))))]
+    (second (apply inner-build "" tabular node-fns))))
+
+(comment
+  (-> (table->trees
+        ;; The table we'll convert to a tree
+        [{:from "MXN" :to "AUD" :on "BrokerA" :return (rand)}
+         {:from "MXN" :to "USD" :on "BrokerB" :return (rand)}
+         {:from "MXN" :to "JPY" :on "BrokerB" :return (rand)}
+         {:from "USD" :to "AUD" :on "BrokerA" :return (rand)}]
+
+        ;; The data fields we want to look at
+        #(-> {"Return"            (format "%.2f%%" (:return %))
+              "Trade Description" (format "%s -> %s" (:from %) (:to %))})
+
+        ;; The top level label -- split by above/below 50% return
+        #(if (> (:return %) 0.5) "High Return" "Some Return")
+
+        ;; Then split by which currency we start with
+        #(str "Trading " (:from %))
+
+        ;; Finally, by broker
+        :on)
+      (unaggregated-table)
+      (render :indent-width 5)
+      (print-table {:empty-str "" :pad-width 5})))
+
+; =>                       Return     Trade Description
+;       High Return
+;       Trading MXN
+;              BrokerA     0.70%      MXN -> AUD
+;              BrokerB
+;                          0.68%      MXN -> USD
+;                          0.93%      MXN -> JPY
+;     Some Return
+;         Trading USD
+;              BrokerA     0.20%      USD -> AUD"

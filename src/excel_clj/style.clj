@@ -175,6 +175,7 @@
 
 (def data-formats
   {:accounting "_($* #,##0.00_);_($* (#,##0.00);_($* \"-\"??_);_(@_)"
+   :number "#.###############"
    :ymd "yyyy-MM-dd"
    :percent "0.00%"})
 
