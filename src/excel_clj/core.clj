@@ -14,7 +14,7 @@
             [excel-clj.style :as style]
             [clojure.string :as string]
             [clojure.java.io :as io])
-  (:import (org.apache.poi.ss.usermodel Cell RichTextString BorderStyle)
+  (:import (org.apache.poi.ss.usermodel Cell RichTextString)
            (org.apache.poi.xssf.usermodel XSSFWorkbook XSSFSheet)
            (java.io FileOutputStream File)
            (java.awt Desktop HeadlessException)
@@ -200,18 +200,19 @@
   If provided, the formatters argument is a function that takes the integer
   depth of a category (increases with nesting) and returns a cell format for
   the row, and total-formatters is the same for rows that are totals."
-  [t & {:keys [headers formatters total-formatters]
+  [t & {:keys [headers formatters total-formatters data-format]
         :or {formatters style/default-tree-formatters
-             total-formatters style/default-tree-total-formatters}}]
+             total-formatters style/default-tree-total-formatters
+             data-format :accounting}}]
   (try
-    (let [tabular (tree/tree->raw-table (second t))
+    (let [tabular (tree/accounting-table (second t))
           fmt-or-max (fn [fs n]
                        (or (get fs n) (second (apply max-key first fs))))
           all-colls (or headers
                         (sequence
                           (comp
                             (mapcat keys)
-                            (filter (complement #{:depth :label}))
+                            (filter (complement qualified-keyword?))
                             (distinct))
                           tabular))
           header-style {:font {:bold true} :alignment :right}]
@@ -225,14 +226,14 @@
 
         ;; Line items
         (for [line tabular]
-          (let [total? (empty? (str (:label line)))
+          (let [total? (::tree/total? line)
                 format (or
                          (fmt-or-max
                            (if total? total-formatters formatters)
-                           (:depth line))
+                           (::tree/depth line))
                          {})
-                style (style/merge-all format {:data-format :accounting})]
-            (into [{:value (:label line) :style (if total? {} style)}]
+                style (style/merge-all format {:data-format data-format})]
+            (into [{:value (::tree/label line) :style (if total? {} style)}]
                   (map #(->{:value (get line %) :style style})) all-colls)))))
     (catch Exception e
       (throw (ex-info "Failed to render tree" {:tree t} e)))))

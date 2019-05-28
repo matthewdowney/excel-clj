@@ -24,19 +24,19 @@
     (testing "Sums a single leaf properly."
       (is (= {2018 100M, 2017 85M} (value cash-leaf))))))
 
-(deftest tree-math-test
+(deftest math-test
   (testing "Addition & subtraction works on trees & maps"
     (let [[assets liabilities-equity] mock-balance-sheet]
       ;; Assets  & liabilities/equity cancel each other, leaving just the map
-      (is (= (tree-math (- assets (+ liabilities-equity {2018 1, 2017 2})))
+      (is (= (math (- assets (+ liabilities-equity {2018 1, 2017 2})))
              {2018 -1M, 2017 -2M})))))
 
 (deftest negate-tree-test
   (testing "Negates the values in a tree."
     (let [[assets liabilities-equity] mock-balance-sheet]
-      (is (= (tree-math (- assets liabilities-equity))
-             (tree-math (+ assets (negate-tree liabilities-equity)))
-             (tree-math (+ (negate-tree assets) liabilities-equity)))))))
+      (is (= (math (- assets liabilities-equity))
+             (math (+ assets (negate-tree liabilities-equity)))
+             (math (+ (negate-tree assets) liabilities-equity)))))))
 
 (deftest shallow-test
   (testing "Maintains tree structure while combining labels."
