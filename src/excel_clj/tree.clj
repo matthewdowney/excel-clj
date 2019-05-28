@@ -13,8 +13,7 @@
     For some example code, see the functions `balance-sheet-example` or
     `tree-table-example` in this namespace."
     :author "Matthew Downey"} excel-clj.tree
-  (:require
-    [clojure.string :as string]))
+  (:require [clojure.string :as string]))
 
 ;;; Utilities for vector math
 
@@ -65,19 +64,6 @@
         summed))
     (second node)))
 
-(defn seq-tree
-  "The opposite of core/tree-seq: construct a tree given the root and traversal
-  functions."
-  ([branch? children root]
-   (seq-tree branch? children root identity))
-  ([branch? children root leaf-factory]
-   (letfn [(traverse [node]
-             (if-not (branch? node)
-               (leaf-factory node)
-               (fn []
-                 [node (mapv #(trampoline traverse %) (children node))])))]
-     (trampoline traverse root))))
-
 (defn force-map
   "Returns the argument if it's a map, otherwise calls `value` on the arg."
   [tree-or-map]
@@ -120,36 +106,44 @@
     {'+ `add-trees, '- `subtract-trees}
     form))
 
-;;; Modify a tree by mapping over its nodes and reconstructing
+;;; Utilities for constructing & walking trees
 
-(defn map-nodes
+(defn walk
   "Map f across all [label attrs] and [label [child]] nodes."
-  [tree f]
-  (letfn [(map' [node]
-            (if (leaf? node)
-              (f node)
-              (fn []
-                (let [recurred (mapv #(trampoline map' %) (children node))
-                      children' (or
-                                  (not-empty (vec (filter some? recurred)))
-                                  {})]
-                  (f [(label node) children'])))))]
-    (trampoline map' tree)))
+  ([f tree]
+   (walk f (complement leaf?) children tree))
+  ([f branch? children root]
+   (let [walk (fn walk [node]
+                (if (branch? node)
+                  (f node (mapv walk (children node)))
+                  (f node [])))]
+     (walk root))))
 
-(defn map-leaves
-  "Map f across all leaf nodes."
-  [tree f]
-  (map-nodes tree (fn [node] (cond-> node (leaf? node) f))))
+(defn ->tree
+  "Construct a tree given the same arguments as `tree-seq`.
 
-(defn map-leaf-vals
-  "Map f across the value map of all leaves."
-  [tree f]
-  (map-leaves tree (fn [[label attrs]] [label (f attrs)])))
+  Use in conjunction with some mapping function over the tree to build a tree."
+  [branch? children root]
+  (walk (fn [node children] [node (vec children)]) branch? children root))
+
+(comment
+  "For example, create a file tree with nodes listing the :size of each file."
+  (walk
+    (fn [f xs]
+      (if-not (seq xs)
+        [(.getName f) {:size (.length f)}]
+        [(.getName f) xs]))
+    #(.isDirectory %) #(.listFiles %) (clojure.java.io/file ".")))
 
 (defn negate-tree
   "Negate all of the numbers in a tree."
   [tree]
-  (map-leaf-vals tree negate-map))
+  (walk
+    (fn [node children]
+      (if-not (seq children)
+        [(label node) (negate-map (value node))]
+        [(label node) children]))
+    tree))
 
 (defn shallow
   "'Shallow' the tree one level by getting rid of the root and combining its

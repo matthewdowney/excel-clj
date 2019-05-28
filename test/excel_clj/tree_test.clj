@@ -1,7 +1,6 @@
 (ns excel-clj.tree-test
   (:require [clojure.test :refer :all])
-  (:require [excel-clj.tree :refer :all]
-            [clojure.string :as string]))
+  (:require [excel-clj.tree :refer :all]))
 
 (def ^:private cash-leaf
   ["Cash" {2018 100M, 2017 85M}])
@@ -31,19 +30,6 @@
       ;; Assets  & liabilities/equity cancel each other, leaving just the map
       (is (= (tree-math (- assets (+ liabilities-equity {2018 1, 2017 2})))
              {2018 -1M, 2017 -2M})))))
-
-(deftest map-nodes-test
-  (let [alt-leaf (assoc cash-leaf 0 "Kash")
-        doubled-leaf ["Cash" {2018 200M, 2017, 170M}]]
-    (is (= ["assets" [doubled-leaf (assoc doubled-leaf 0 "Kash")]]
-           (map-nodes
-             ["Assets" [cash-leaf alt-leaf]]
-             (fn [node]
-               (if (leaf? node)
-                 ;; Double the value of each leaf
-                 [(first node) (tree-math (+ node node))]
-                 ;; Lowercase others
-                 (update node 0 string/lower-case))))))))
 
 (deftest negate-tree-test
   (testing "Negates the values in a tree."
