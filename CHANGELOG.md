@@ -1,5 +1,12 @@
 # Change Log
 
+## [1.1.0] - 2019-05-28
+### Added
+- More flexible tree rendering/aggregation
+
+### Changed
+- Replaced lots of redundant tree code with a `walk` function
+
 ## [1.0.0] - 2019-04-17
 ### Added
 - PDF generation
