@@ -163,8 +163,10 @@
                 (mapv #(update % ::depth inc) children)
                 ;; And finally an aggregation if there are multiple header children
                 ;; or any leaf children
-                (when (or (> (count (group-by :depth children)) 2) (not (::header? (first children))))
-                  [(merge {::depth 0 ::label "" ::total? true} (value node aggregate-with))]))
+                (let [fchild (first children)
+                      siblings (get (group-by :depth children) (:depth fchild))]
+                  (when (or (>= (count siblings) 2) (not (::header? fchild)))
+                    [(merge {::depth 0 ::label "" ::total? true} (value node aggregate-with))])))
               ;; A leaf just has its label & value attrs. The depth is inc'd by each
               ;; parent back to the root, so it does not stay at 0.
               (merge {::depth 0 ::label (label node)} (value node aggregate-with))))
