@@ -1,5 +1,17 @@
 # Change Log
 
+## [1.1.2] - 2019-06-04
+### Fixed
+- If the first level of the tree is a leaf, `accounting-table` doesn't walk it 
+  correctly.
+### Added
+- Can pass through a custom `:min-leaf-depth` key to `tree` (replaces binding a 
+dynamic var in earlier versions).
+
+## [1.1.1] - 2019-06-01
+### Fixed
+- Total rows were not always being displayed correctly for trees
+
 ## [1.1.0] - 2019-05-28
 ### Added
 - More flexible tree rendering/aggregation

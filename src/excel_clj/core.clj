@@ -200,12 +200,13 @@
   If provided, the formatters argument is a function that takes the integer
   depth of a category (increases with nesting) and returns a cell format for
   the row, and total-formatters is the same for rows that are totals."
-  [t & {:keys [headers formatters total-formatters data-format]
+  [t & {:keys [headers formatters total-formatters min-leaf-depth data-format]
         :or {formatters style/default-tree-formatters
              total-formatters style/default-tree-total-formatters
+             min-leaf-depth 2
              data-format :accounting}}]
   (try
-    (let [tabular (tree/accounting-table (second t))
+    (let [tabular (tree/accounting-table (second t) :min-leaf-depth min-leaf-depth)
           fmt-or-max (fn [fs n]
                        (or (get fs n) (second (apply max-key first fs))))
           all-colls (or headers
