@@ -8,7 +8,7 @@ common sense styling.
 
 Lein:
 ```
-[org.clojars.mjdowney/excel-clj "1.1.2"]
+[org.clojars.mjdowney/excel-clj "1.2.0"]
 ```
 
 - [Getting Started](#getting-started)
