@@ -13,15 +13,18 @@
   (:require [excel-clj.tree :as tree]
             [excel-clj.style :as style]
             [clojure.string :as string]
-            [clojure.java.io :as io])
+            [clojure.java.io :as io]
+            [taoensso.tufte :as tufte :refer (defnp p profiled profile)])
   (:import (org.apache.poi.ss.usermodel Cell RichTextString)
-           (org.apache.poi.xssf.usermodel XSSFWorkbook XSSFSheet)
-           (java.io FileOutputStream File)
+           (org.apache.poi.xssf.usermodel XSSFWorkbook XSSFSheet XSSFRow XSSFCell)
+           (java.io File)
            (java.awt Desktop HeadlessException)
            (java.util Calendar Date)
            (org.apache.poi.ss.util CellRangeAddress)
            (org.jodconverter.office DefaultOfficeManagerBuilder)
            (org.jodconverter OfficeDocumentConverter)))
+
+(set! *warn-on-reflection* true)
 
 ;;; Low level code to write to & style sheets; you probably shouldn't have to
 ;;; touch this to make use of the API, but might choose to when adding or
@@ -71,19 +74,39 @@
   [^Cell cell data]
   ;; These types are allowed natively
   (if-type [data [Boolean Calendar String Date Double RichTextString]]
-    (doto cell (.setCellValue data))
+           (doto cell (.setCellValue data))
 
-    ;; Apache POI requires that numbers be doubles
-    (if (number? data)
-      (doto cell (.setCellValue (double data)))
+           ;; Apache POI requires that numbers be doubles
+           (if (number? data)
+             (doto cell (.setCellValue (double data)))
 
-      ;; Otherwise stringify it
-      (doto cell (.setCellValue ^String (or (some-> data pr-str) ""))))))
+             ;; Otherwise stringify it
+             (let [to-write (or (some-> data pr-str) "")]
+               (doto cell (.setCellValue ^String to-write))))))
 
 (def ^:dynamic *max-col-width*
   "Sometimes POI's auto sizing isn't super intelligent, so set a sanity-max on
-  the  column width."
+  the column width."
   15000)
+
+(defmacro ^:private doparallel [[sym coll] & body]
+  "Performance hack for writing the POI cells.
+  Like (dotimes [x xs] ...) but parallel."
+  `(let [n# (+ 2 (.. Runtime getRuntime availableProcessors))
+         equal-chunks# (loop [num# n#, parts# [], coll# ~coll, c# (count ~coll)]
+                         (if (<= num# 0)
+                           parts#
+                           (let [t# (quot (+ c# num# -1) num#)]
+                             (recur (dec num#) (conj parts# (take t# coll#))
+                                    (drop t# coll#) (- c# t#)))))
+         workers#
+         (doall
+           (for [chunk# equal-chunks#]
+             (future
+               (doseq [~sym chunk#]
+                 ~@body))))]
+     (doseq [w# workers#]
+       (deref w#))))
 
 (defn- ^XSSFSheet write-grid!
   "Modify the given workbook by adding a sheet with the given name built from
@@ -101,35 +124,77 @@
         build-style' (memoize ;; Immutable styles can share mutable objects :)
                        (fn [style-map]
                          (->> (style/merge-all style/default-style (or style-map {}))
-                              (style/build-style workbook))))]
+                              (style/build-style workbook))))
+        layout (volatile! {})]
     (try
+
+      ;; N.B. So this code got uglier due to performance. Writing the cells
+      ;; takes many seconds for a large sheet (~50,000 rows) and we can improve
+      ;; the process a bit by doing the cell creation sequentially and the cell
+      ;; writing in parallel (on test data set reduced from ~19s to ~14s).
+
+      ;; Unfortunately much of the time is spent writing to disk (~8s).
+
+      ;; We have to do this part sequentially because POI doesn't use
+      ;; thread-safe data structures
       (doseq [[row-idx row-data] (map-indexed vector grid)]
-        (let [row (.createRow sh (int row-idx))]
+        (let [row (p :create-row (.createRow sh (int row-idx)))]
           (loop [col-idx 0 cells row-data]
             (when-let [cell-data (first cells)]
-              (let [cell (.createCell row col-idx)
+              ;; (1) Build the cell
+              (let [cell (p :create-cell (.createCell ^XSSFRow row col-idx))
                     width (if (map? cell-data) (get cell-data :width 1) 1)]
-                (write-cell! cell (cond-> cell-data (map? cell-data) :value))
-                (.setCellStyle
-                  cell
-                  (build-style' (if (map? cell-data) (:style cell-data) {})))
+
+                ;; (2) Merge if necessary into adjacent cells
                 (when (> width 1)
                   (.addMergedRegion
                     sh (CellRangeAddress.
                          row-idx row-idx col-idx (dec (+ col-idx width)))))
+
+                ;; (3) Save the cell
+                (vswap! layout assoc-in [row-idx col-idx] cell)
                 (recur (+ col-idx ^long width) (rest cells)))))))
+
+      ;; We can do this part in parallel at least, since the cells are all
+      ;; different objects
+      (let [layout @layout]
+        (doparallel [row (map-indexed vector grid)]
+          (let [[row-idx row-data] row]
+            (loop [col-idx 0, cells row-data]
+              (when-let [cell-data (first cells)]
+                ;; (1) Find the cell
+                (let [width (if (map? cell-data) (get cell-data :width 1) 1)
+                      ^XSSFCell cell (get (get layout row-idx) col-idx)]
+
+                ;; (2) Write the cell data
+                (p :write-cell
+                   (write-cell! cell (cond-> cell-data (map? cell-data) :value)))
+
+                ;; (3) Set the cell style
+                (let [style (build-style'
+                              (if (map? cell-data) (:style cell-data) {}))]
+                  (p :set-cell-style
+                     (.setCellStyle cell style)))
+
+                (recur (+ col-idx ^long width) (rest cells))))))))
       (catch Exception e
         (-> "Failed to write grid!"
             (ex-info {:sheet-name sheet-name :grid grid} e)
             (throw))))
 
     (dotimes [i (transduce (map count) (completing max) 0 grid)]
-      (.autoSizeColumn sh i)
+
+      ;; Only auto-size small tables because it takes forever (~10s on a large
+      ;; grid)
+      (when (< (count grid) 2000)
+        (p :auto-size (.autoSizeColumn sh i)))
+
       (when (> (.getColumnWidth sh i) *max-col-width*)
         (.setColumnWidth sh i *max-col-width*)))
 
-    (.setFitToPage sh true)
-    (.setFitWidth (.getPrintSetup sh) 1)
+    (p :set-print-settings
+       (.setFitToPage sh true)
+       (.setFitWidth (.getPrintSetup sh) 1))
     sh))
 
 (defn- workbook!
@@ -278,8 +343,9 @@
           (fn [wb [sheet-name grid]] (doto wb (write-grid! sheet-name grid)))
           (workbook!)
           (seq workbook))]
-    (with-open [fos (FileOutputStream. (str path'))]
-      (.write wb fos))
+    (p :write-to-disk
+       (with-open [fos (io/output-stream (io/file (str path')))]
+         (.write wb fos)))
     (io/file path')))
 
 (defn convert-pdf!
@@ -359,4 +425,3 @@
   ;; with the same contents. On platforms without OpenOffice the convert-pdf!
   ;; call will most likely fail.
   (open (convert-pdf! (example) (temp ".pdf"))))
-
