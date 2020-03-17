@@ -211,56 +211,29 @@ that includes optional style data / cell merging instructions.
 
 ![A spreadsheet with a merged title](resources/manual-grid.png)
 
-## Roadmap
-
-- Templates! There's no reason to do all of the styling work programmatically. 
-  We should be able to download [some cool Google Sheets template](https://docs.google.com/spreadsheets/u/0/?usp=mkt_sheets_tpl)
-  as an `.xlsx` file, edit it to indicate where `excel-clj` should fill in tables,
-  trees, or individual cells, and then write code that reads the template from a
-  `resources/some-template.xlsx` and produces a filled in sheet.
-  
-  Not at all a fully formed spec yet, but something along the lines of filling 
-  in the following sheet:
-  
-  ![Template draft](resources/template-draft.png)
-  
-  Using some simple data:
-  ```clojure 
-  {:title           "The Title"
-   :start-date      (Date. (- (System/currentTimeMillis) (* 1000 60 60 24 7)))
-   :end-date        (Date.)
-   :employee-name   "Foo"
-   :employee-id     "Bar"
-   :manager-name    "Baz"
-   :department      "Accounting"
-   :expense-purpose "Trip"
-   :tbl [{:date (Date.) :category "Cat A" :desc "Misc expenses" 
-          :notes "" :amount 500.00M}
-         {:date (Date.) :category "Cat B" :desc "Other expenses" 
-          :notes "" :amount 100.00M}]}
-  ```
-  
-  To get the following result:
-  
-  ![Filled in template draft](resources/filled-template-draft.png)
-
-- Reading & editing existing spreadsheets. This should go hand in hand with 
-  template generation.
-  
-- Formulas! We don't have them. I'm envisioning a syntax where a table column
-  or a cell contain a `:value` of `(excel/formula ...)`. The interior of the
-  formula could allow relative coordinate generation with the placeholders `*x*` 
-  and `*y*` — which could be operated on to find relative coordinates (e.g. 
-  `(- *x* 2)`) — and would then be replaced during rendering with the column and 
-  row. E.g. 
-  
-  ```clojure
-  (def table-data
-    [{"Foos" 10, "Bars" 5, "Total" (excel/formula "=(- *x* 2)*y* + (- *x* 1)*y*")}
-     {"Foos" 12, "Bars" 8, "Total" (excel/formula "=(- *x* 2)*y* + (- *x* 1)*y*")}])
-  ```
-  
-  would result in the formulas being rendered in the C column after the title 
-  row, the first being `=A1+B1` and the second being `=A2+B2`.
-  
-- Java wrapper? Uncertain if this would be useful / how it would look.
+## v2.0.0 Roadmap
+- A higher-level interface that allows wrapping side-effecting code in a `view`
+  or a `write` macro to redirect any `clojure.pprint/print-table` effects into
+  a spreadsheet.
+  - Likewise, an improved `pprint` for trees that works under the same abstraction.
+  - Sheet names can be specified via meta data.
+- Performance improvements. Right now, performance starts to break down after 
+  about 100,000 rows on my Ubuntu / OpenOffice setup, and much sooner on Mac.
+  - Rework the lower-level interface to take full advantage of laziness, where 
+    possible.
+  - Rethink the way formatting is handled.
+  - Check if it ends up being more performant to write a chunk of the file, and
+    then re-open it to write the next chunk. This will have to do with Apache 
+    POIs way of dealing with memory, so I'll have to investigate that first.
+- Templates which provide an easy way to work with formulas and styling. The 
+  planned functionality is simple: instead of overwriting a document, allow
+  overwriting a single sheet within the document.
+  - Then to create a template, you just make a .xlsx file, or download
+    [some cool Google Sheets template](https://docs.google.com/spreadsheets/u/0/?usp=mkt_sheets_tpl),
+    with multiple sheets.
+  - Some of the sheets are _only_ source data, which we'll write to programatically,
+    and other sheets depend on those source sheets (via formulas, macros, etc.).
+- Tentatively: a Java wrapper or some RPC interface for other languages to use 
+  the functionality of this library, maybe by passing in JSON tables / trees? 
+  Though "start-writing" and "stop-wrting" commands with lines of data in between 
+  might be more practical.
