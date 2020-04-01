@@ -1,5 +1,14 @@
 # Change Log
 
+## [1.2.1] - 2020-04-01
+### Added
+- Can bind a dynamic `*n-threads*` var to set the number of threads used during 
+  writing.
+
+## [1.2.0] - 2020-08-13
+### Added
+- Performance improvements for large worksheets.
+
 ## [1.1.2] - 2019-06-04
 ### Fixed
 - If the first level of the tree is a leaf, `accounting-table` doesn't walk it 
