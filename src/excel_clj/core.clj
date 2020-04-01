@@ -89,10 +89,14 @@
   the column width."
   15000)
 
+(def ^:dynamic *n-threads*
+  "Allow a custom number of threads used during writing."
+  (+ 2 (.. Runtime getRuntime availableProcessors)))
+
 (defmacro ^:private doparallel [[sym coll] & body]
   "Performance hack for writing the POI cells.
   Like (dotimes [x xs] ...) but parallel."
-  `(let [n# (+ 2 (.. Runtime getRuntime availableProcessors))
+  `(let [n# *n-threads*
          equal-chunks# (loop [num# n#, parts# [], coll# ~coll, c# (count ~coll)]
                          (if (<= num# 0)
                            parts#
