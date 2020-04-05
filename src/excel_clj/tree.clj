@@ -1,10 +1,10 @@
-(ns
-  ^{:doc "A key-value tree for Excel (accounting) data. The format is
-    [Label [Children]] for nodes and [Label {:column :value}] for leaves.
+(ns excel-clj.tree
+  "A key-value tree for Excel (accounting) data. The format is
+  [Label [Children]] for nodes and [Label {:column :value}] for leaves.
 
-    For some example code, check out the various (comment ...) blocks in this
-    namespace."
-    :author "Matthew Downey"} excel-clj.tree
+  For some example code, check out the various (comment ...) blocks in this
+  namespace."
+  {:author "Matthew Downey"}
   (:require [clojure.string :as string]
             [clojure.walk :as cwalk]))
 

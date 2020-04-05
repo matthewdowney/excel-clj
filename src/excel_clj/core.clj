@@ -1,5 +1,5 @@
-(ns
-  ^{:doc "Utilities for declarative creation of Excel (.xlsx) spreadsheets,
+(ns excel-clj.core
+  "Utilities for declarative creation of Excel (.xlsx) spreadsheets,
   with higher level abstractions over Apache POI (https://poi.apache.org/).
 
   The highest level data abstraction used to create excel spreadsheets is a
@@ -9,202 +9,26 @@
   grid of [[cell]].
 
   Run the (example) function at the bottom of this namespace to see more."
-    :author "Matthew Downey"} excel-clj.core
+  {:author "Matthew Downey"}
   (:require [excel-clj.tree :as tree]
             [excel-clj.style :as style]
+            [excel-clj.prototype :as pt]
             [clojure.string :as string]
-            [clojure.java.io :as io]
-            [taoensso.tufte :as tufte :refer (defnp p profiled profile)])
-  (:import (org.apache.poi.ss.usermodel Cell RichTextString)
-           (org.apache.poi.xssf.usermodel XSSFWorkbook XSSFSheet XSSFRow XSSFCell)
-           (java.io File)
+            [clojure.java.io :as io])
+  (:import (java.io File)
            (java.awt Desktop HeadlessException)
-           (java.util Calendar Date)
-           (org.apache.poi.ss.util CellRangeAddress)
            (org.jodconverter.office DefaultOfficeManagerBuilder)
            (org.jodconverter OfficeDocumentConverter)))
 
 (set! *warn-on-reflection* true)
 
-;;; Low level code to write to & style sheets; you probably shouldn't have to
-;;; touch this to make use of the API, but might choose to when adding or
-;;; extending functionality
-
-(defmacro ^:private if-type
-  "For situations where there are overloads of a Java method that accept
-  multiple types and you want to either call the method with a correct type
-  hint (avoiding reflection) or do something else.
-
-  In the `if-true` form, the given `sym` becomes type hinted with the type in
-  `types` where (instance? type sym). Otherwise the `if-false` form is run."
-  [[sym types] if-true if-false]
-  (let [typed-sym (gensym)]
-    (letfn [(with-hint [type]
-              (let [using-hinted
-                    ;; Replace uses of the un-hinted symbol if-true form with
-                    ;; the generated symbol, to which we're about to add a hint
-                    (clojure.walk/postwalk-replace {sym typed-sym} if-true)]
-                ;; Let the generated sym with a hint, e.g. (let [^Float x ...])
-                `(let [~(with-meta typed-sym {:tag type}) ~sym]
-                   ~using-hinted)))
-            (condition [type] (list `(instance? ~type ~sym) (with-hint type)))]
-      `(cond
-         ~@(mapcat condition types)
-         :else ~if-false))))
-
-;; Example of the use of if-type
-(comment
-  (let [test-fn #(time (reduce + (map % (repeat 1000000 "asdf"))))
-        reflection (fn [x] (.length x))
-        len-hinted (fn [^String x] (.length x))
-        if-type' (fn [x] (if-type [x [String]]
-                           (.length x)
-                           ;; So we know it executes the if-true path
-                           (throw (RuntimeException.))))]
-    (println "Running...")
-    (print "With manual type hinting =>" (with-out-str (test-fn len-hinted)))
-    (print "With if-type hinting     =>" (with-out-str (test-fn if-type')))
-    (print "With reflection          => ")
-    (flush)
-    (print (with-out-str (test-fn reflection)))))
-
-(defn- write-cell!
-  "Write the given data to the mutable cell object, coercing its type if
-  necessary."
-  [^Cell cell data]
-  ;; These types are allowed natively
-  (if-type [data [Boolean Calendar String Date Double RichTextString]]
-           (doto cell (.setCellValue data))
-
-           ;; Apache POI requires that numbers be doubles
-           (if (number? data)
-             (doto cell (.setCellValue (double data)))
-
-             ;; Otherwise stringify it
-             (let [to-write (or (some-> data pr-str) "")]
-               (doto cell (.setCellValue ^String to-write))))))
-
-(def ^:dynamic *max-col-width*
-  "Sometimes POI's auto sizing isn't super intelligent, so set a sanity-max on
-  the column width."
+(def ^{:dynamic true :deprecated true} *max-col-width*
+  "Deprecated -- no longer has any effect."
   15000)
 
-(def ^:dynamic *n-threads*
-  "Allow a custom number of threads used during writing."
+(def ^{:dynamic true :deprecated true} *n-threads*
+  "Deprecated -- no longer has any effect."
   (+ 2 (.. Runtime getRuntime availableProcessors)))
-
-(defmacro ^:private doparallel [[sym coll] & body]
-  "Performance hack for writing the POI cells.
-  Like (dotimes [x xs] ...) but parallel."
-  `(let [n# *n-threads*
-         equal-chunks# (loop [num# n#, parts# [], coll# ~coll, c# (count ~coll)]
-                         (if (<= num# 0)
-                           parts#
-                           (let [t# (quot (+ c# num# -1) num#)]
-                             (recur (dec num#) (conj parts# (take t# coll#))
-                                    (drop t# coll#) (- c# t#)))))
-         workers#
-         (doall
-           (for [chunk# equal-chunks#]
-             (future
-               (doseq [~sym chunk#]
-                 ~@body))))]
-     (doseq [w# workers#]
-       (deref w#))))
-
-(defn- ^XSSFSheet write-grid!
-  "Modify the given workbook by adding a sheet with the given name built from
-  the provided grid.
-
-  The grid is a collection of rows, where each cell is either a plain, non-map
-  value or a map of {:value ..., :style ..., :width ...}, with :value being the
-  contents of the cell, :style being an optional map of style data, and :width
-  being an optional cell width dictating how many horizontal slots the cell
-  takes up (creates merged cells).
-
-  Returns the sheet object."
-  [^XSSFWorkbook workbook ^String sheet-name grid]
-  (let [^XSSFSheet sh (.createSheet workbook sheet-name)
-        build-style' (memoize ;; Immutable styles can share mutable objects :)
-                       (fn [style-map]
-                         (->> (style/merge-all style/default-style (or style-map {}))
-                              (style/build-style workbook))))
-        layout (volatile! {})]
-    (try
-
-      ;; N.B. So this code got uglier due to performance. Writing the cells
-      ;; takes many seconds for a large sheet (~50,000 rows) and we can improve
-      ;; the process a bit by doing the cell creation sequentially and the cell
-      ;; writing in parallel (on test data set reduced from ~19s to ~14s).
-
-      ;; Unfortunately much of the time is spent writing to disk (~8s).
-
-      ;; We have to do this part sequentially because POI doesn't use
-      ;; thread-safe data structures
-      (doseq [[row-idx row-data] (map-indexed vector grid)]
-        (let [row (p :create-row (.createRow sh (int row-idx)))]
-          (loop [col-idx 0 cells row-data]
-            (when-let [cell-data (first cells)]
-              ;; (1) Build the cell
-              (let [cell (p :create-cell (.createCell ^XSSFRow row col-idx))
-                    width (if (map? cell-data) (get cell-data :width 1) 1)]
-
-                ;; (2) Merge if necessary into adjacent cells
-                (when (> width 1)
-                  (.addMergedRegion
-                    sh (CellRangeAddress.
-                         row-idx row-idx col-idx (dec (+ col-idx width)))))
-
-                ;; (3) Save the cell
-                (vswap! layout assoc-in [row-idx col-idx] cell)
-                (recur (+ col-idx ^long width) (rest cells)))))))
-
-      ;; We can do this part in parallel at least, since the cells are all
-      ;; different objects
-      (let [layout @layout]
-        (doparallel [row (map-indexed vector grid)]
-          (let [[row-idx row-data] row]
-            (loop [col-idx 0, cells row-data]
-              (when-let [cell-data (first cells)]
-                ;; (1) Find the cell
-                (let [width (if (map? cell-data) (get cell-data :width 1) 1)
-                      ^XSSFCell cell (get (get layout row-idx) col-idx)]
-
-                ;; (2) Write the cell data
-                (p :write-cell
-                   (write-cell! cell (cond-> cell-data (map? cell-data) :value)))
-
-                ;; (3) Set the cell style
-                (let [style (build-style'
-                              (if (map? cell-data) (:style cell-data) {}))]
-                  (p :set-cell-style
-                     (.setCellStyle cell style)))
-
-                (recur (+ col-idx ^long width) (rest cells))))))))
-      (catch Exception e
-        (-> "Failed to write grid!"
-            (ex-info {:sheet-name sheet-name :grid grid} e)
-            (throw))))
-
-    (dotimes [i (transduce (map count) (completing max) 0 grid)]
-
-      ;; Only auto-size small tables because it takes forever (~10s on a large
-      ;; grid)
-      (when (< (count grid) 2000)
-        (p :auto-size (.autoSizeColumn sh i)))
-
-      (when (> (.getColumnWidth sh i) *max-col-width*)
-        (.setColumnWidth sh i *max-col-width*)))
-
-    (p :set-print-settings
-       (.setFitToPage sh true)
-       (.setFitWidth (.getPrintSetup sh) 1))
-    sh))
-
-(defn- workbook!
-  "Create a new Apache POI XSSFWorkbook workbook object."
-  []
-  (XSSFWorkbook.))
 
 ;;; Higher-level code to specify grids in terms of clojure data structures,
 ;;; organized as either a table or a tree
@@ -242,16 +66,15 @@
                       {:value (get row col-name)
                        :style style}))
         getters (map (fn [col-name] #(data-cell col-name %)) headers)
-        rows (mapv (apply juxt getters) tabular-data)
         header-style (or header-style
                          ;; Add right alignment if it's an accounting column
                          (fn [name]
                            (cond-> (style/default-header-style name)
                                    (@numeric? name)
                                    (assoc :alignment :right))))]
-    (into
-      [(mapv #(->{:value % :style (header-style %)}) headers)]
-      rows)))
+    (cons
+      (map (fn [x] {:value x :style (header-style x)}) headers)
+      (map (apply juxt getters) tabular-data))))
 
 (defn tree
   "Build a sheet grid from the provided tree of data
@@ -340,17 +163,18 @@
   The workbook is a key value collection of (sheet-name grid), either as map or
   an association list (if ordering is important)."
   [workbook path]
-  (let [path' (force-extension path "xlsx")
-        ;; Create the mutable, POI workbook object
-        ^XSSFWorkbook wb
-        (reduce
-          (fn [wb [sheet-name grid]] (doto wb (write-grid! sheet-name grid)))
-          (workbook!)
-          (seq workbook))]
-    (p :write-to-disk
-       (with-open [fos (io/output-stream (io/file (str path')))]
-         (.write wb fos)))
-    (io/file path')))
+  (let [convert-cell (fn [{:keys [value style width height]
+                           :or   {width 1 height 1}
+                           :as   cell-data}]
+                       (if-not (map? cell-data)
+                         (pt/wrapped cell-data)
+                         (-> (pt/wrapped value)
+                             (pt/style style)
+                             (pt/dims {:width width :height height}))))
+        convert-row (fn [row] (map convert-cell row))]
+    (pt/write!
+      (map (fn [[sheet grid]] [sheet (map convert-row grid)]) workbook)
+      path)))
 
 (defn convert-pdf!
   "Convert the `from-document`, either a File or a path to any office document,
@@ -424,8 +248,31 @@
       ["This" "Row" "Has" "Its" "Own"
        {:value "Format" :style {:font {:bold true}}}]]}))
 
+
 (comment
+  ;; This should open an Excel workbook
+  (example)
+
   ;; This will both open an example excel sheet and write & open a test pdf file
   ;; with the same contents. On platforms without OpenOffice the convert-pdf!
   ;; call will most likely fail.
-  (open (convert-pdf! (example) (temp ".pdf"))))
+  (open (convert-pdf! (example) (temp ".pdf")))
+
+  ;; Expose ordering / styling issues in v1.2.X
+  (quick-open
+    [["Test"
+      (table
+        (for [x (range 10000)]
+          {"N" x "N^2" (* x x) "N^3" (* x x x)}))]])
+
+  ;; Ballpark performance test
+  (dotimes [_ 5]
+    (time
+      (write!
+        [["Test"
+          (table
+            (for [x (range 100000)]
+              {"N" x "N^2" (* x x) "N^3" (* x x x)}))]]
+        "test.xlsx")))
+
+  )
