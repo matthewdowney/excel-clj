@@ -1,5 +1,14 @@
 # Change Log
 
+## [1.3.0] - 2020-04-05
+### Added
+- A lower-level, writer style interface for Apache POI.
+- [Prototype/brainstorm](src/excel_clj/prototype.clj) of less complicated, 
+  pure-data replacement for high-level API in upcoming v2 release.
+### Fixed
+- Bug (#3) with the way cells were being written via POI that would write cells
+  out of order or mix up the style data between cells.
+
 ## [1.2.1] - 2020-04-01
 ### Added
 - Can bind a dynamic `*n-threads*` var to set the number of threads used during 
