@@ -259,11 +259,9 @@
   (open (convert-pdf! (example) (temp ".pdf")))
 
   ;; Expose ordering / styling issues in v1.2.X
-  (quick-open
-    [["Test"
-      (table
-        (for [x (range 10000)]
-          {"N" x "N^2" (* x x) "N^3" (* x x x)}))]])
+(quick-open {"Test" (table
+                      (for [x (range 10000)]
+                        {"N" x, "N^2" (* x x), "N^3" (* x x x)}))})
 
   ;; Ballpark performance test
   (dotimes [_ 5]
