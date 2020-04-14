@@ -2,7 +2,6 @@
   "Prototype features to be included in v2.0.0 -- everything subject to change."
   {:author "Matthew Downey"}
   (:require [excel-clj.poi :as poi]
-            [excel-clj.cell :as cell]
             [clojure.java.io :as io]
             [clojure.string :as string]
             [taoensso.encore :as enc])

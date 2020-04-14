@@ -59,7 +59,8 @@
             workbook :font {:bold true :font-height-in-points 10}))))"
   {:author "Matthew Downey"}
   (:require [clojure.string :as string]
-            [clojure.reflect :as reflect])
+            [clojure.reflect :as reflect]
+            [rhizome.viz :as viz])
   (:import (org.apache.poi.ss.usermodel
              DataFormat BorderStyle HorizontalAlignment FontUnderline
              FillPatternType)
@@ -348,7 +349,6 @@
   "If one wanted to visualize all of the nested setters & POI objects...
   Keep in mind that this requires $ apt-get install graphviz"
   []
-  (require '[rhizome.viz :as viz])
   (let [param-type (fn [setter] (resolve (first (:parameter-types setter))))
         is-setter? (fn [{:keys [name parameter-types]}]
                      (and (string/starts-with? (str name) "set")
