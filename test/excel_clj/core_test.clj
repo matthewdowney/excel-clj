@@ -1,6 +1,7 @@
 (ns excel-clj.core-test
   (:require [clojure.test :refer :all]
-            [excel-clj.core :refer :all]))
+            [excel-clj.core :refer :all]
+            [clojure.java.io :as io]))
 
 (deftest table-test
   (let [data [{"Date" "2018-01-01" "% Return" 0.05M "USD" 1500.5005M}
@@ -29,3 +30,12 @@
            ["" 5 2]
            ["Tree 2" nil nil]
            ["Child" -2 -1]]))))
+
+
+(deftest example-test
+  (let [temp-file (io/file (#'excel-clj.core/temp ".xlsx"))]
+    (try
+      (testing "Example code snippet writes successfully."
+        (write! example-workbook-data temp-file))
+      (finally
+        (io/delete-file temp-file)))))
