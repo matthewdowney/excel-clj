@@ -1,6 +1,11 @@
 # Change Log
 
-## [1.3.0] - 2020-04-05
+## [1.3.2] - 2020-04-15
+### Fixed
+- Bug introduced in v1.3.1 where adjacent cells with width > 1 cause an 
+  exception.
+
+## [1.3.1] - 2020-04-05
 ### Added
 - A lower-level, writer style interface for Apache POI.
 - [Prototype/brainstorm](src/excel_clj/prototype.clj) of less complicated, 

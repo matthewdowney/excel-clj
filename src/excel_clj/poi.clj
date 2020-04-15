@@ -121,6 +121,9 @@
           poi-cell (.createCell poi-row cidx)]
 
       (when (or (> width 1) (> height 1))
+        ;; If the width is > 1, move the cursor along so that the next write on
+        ;; this row happens in the next free cell, skipping the merged area
+        (vswap! col-cursor + (dec width))
         (let [ridx @row-cursor
               cra (CellRangeAddress.
                     ridx (dec (+ ridx height))
@@ -213,7 +216,14 @@
       ;; This one won't be visible, because it's hidden behind the tall cell
       (write! t "1")
       (write! t "2")
-      (write! t "3"))))
+      (write! t "3")
+
+      (newline! t)
+      (write! t "Wide" nil 2 1)
+      (write! t "Wider" nil 3 1)
+      (write! t "Much Wider" nil 5 1)))
+
+  )
 
 
 (defn performance-test

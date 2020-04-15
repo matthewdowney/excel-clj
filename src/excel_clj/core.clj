@@ -229,9 +229,8 @@
   [workbook]
   (open (write-pdf! workbook (temp ".pdf"))))
 
-(defn example []
-  (quick-open
-    {"Tree Sheet"
+(def example-workbook-data
+  {"Tree Sheet"
      (tree
        ["Mock Balance Sheet for the year ending Dec 31st, 2018"
         tree/mock-balance-sheet])
@@ -243,11 +242,13 @@
         {"Date" "2018-03-01" "% Return" 0.07M "USD" 2100.66666666M}])
 
      "Freeform Grid Sheet"
-     [["First Column" "Second Column" {:value "A few merged" :width 3}]
+     [["First" "Second" {:value "Wide" :width 2} {:value "Wider" :width 3}]
       ["First Column Value" "Second Column Value"]
       ["This" "Row" "Has" "Its" "Own"
-       {:value "Format" :style {:font {:bold true}}}]]}))
+       {:value "Format" :style {:font {:bold true}}}]]})
 
+(defn example []
+  (quick-open example-workbook-data))
 
 (comment
   ;; This should open an Excel workbook
@@ -259,9 +260,9 @@
   (open (convert-pdf! (example) (temp ".pdf")))
 
   ;; Expose ordering / styling issues in v1.2.X
-(quick-open {"Test" (table
-                      (for [x (range 10000)]
-                        {"N" x, "N^2" (* x x), "N^3" (* x x x)}))})
+  (quick-open {"Test" (table
+                        (for [x (range 10000)]
+                          {"N" x, "N^2" (* x x), "N^3" (* x x x)}))})
 
   ;; Ballpark performance test
   (dotimes [_ 5]
