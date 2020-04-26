@@ -10,11 +10,12 @@
             [excel-clj.style :as style]
             [clojure.walk :as walk]
             [taoensso.tufte :as tufte])
-  (:import (org.apache.poi.xssf.usermodel XSSFWorkbook XSSFRow XSSFSheet)
-           (java.io Closeable)
-           (org.apache.poi.ss.usermodel RichTextString Cell)
+  (:import (java.io Closeable)
+           (org.apache.poi.ss.usermodel RichTextString Sheet Cell Row Workbook)
            (java.util Date Calendar)
-           (org.apache.poi.ss.util CellRangeAddress)))
+           (org.apache.poi.ss.util CellRangeAddress)
+           (org.apache.poi.xssf.streaming SXSSFWorkbook)
+           (org.apache.poi.xssf.usermodel XSSFWorkbook)))
 
 
 (set! *warn-on-reflection* true)
@@ -102,7 +103,7 @@
         (doto cell (.setCellValue ^String to-write))))))
 
 
-(defn- ensure-row! [{:keys [^XSSFSheet sheet row row-cursor]}]
+(defn- ensure-row! [{:keys [^Sheet sheet row row-cursor]}]
   (if-let [r @row]
     r
     (let [^int idx (vswap! row-cursor inc)]
@@ -110,13 +111,13 @@
 
 
 (defrecord ^:private SheetWriter
-  [cell-style-cache ^XSSFSheet sheet row row-cursor col-cursor]
+  [cell-style-cache ^Sheet sheet row row-cursor col-cursor]
   IWorksheetWriter
   (write! [this value]
     (write! this value nil 1 1))
 
   (write! [this value style width height]
-    (let [^XSSFRow poi-row (ensure-row! this)
+    (let [^Row poi-row (ensure-row! this)
           ^int cidx (vswap! col-cursor inc)
           poi-cell (.createCell poi-row cidx)]
 
@@ -153,12 +154,12 @@
   Closeable
   (close [this]
     (tufte/p :set-print-settings
-       (.setFitToPage sheet true)
-       (.setFitWidth (.getPrintSetup sheet) 1))
+      (.setFitToPage sheet true)
+      (.setFitWidth (.getPrintSetup sheet) 1))
     this))
 
 
-(defrecord ^:private WorkbookWriter [^XSSFWorkbook workbook path]
+(defrecord ^:private WorkbookWriter [^Workbook workbook path]
   IWorkbookWriter
   (workbook* [this]
     workbook)
@@ -174,7 +175,7 @@
 (defn ^SheetWriter sheet-writer
   "Create a writer for an individual sheet within the workbook."
   [workbook-writer sheet-name]
-  (let [{:keys [^XSSFWorkbook workbook path]} workbook-writer
+  (let [{:keys [^Workbook workbook path]} workbook-writer
         cache (enc/memoize_
                   (fn [style]
                     (let [style (enc/nested-merge style/default-style style)]
@@ -188,9 +189,16 @@
 
 
 (defn ^WorkbookWriter writer
-  "Open a writer for Excel workbooks."
-  [path]
-  (->WorkbookWriter (XSSFWorkbook.) path))
+  "Open a writer for Excel workbooks.
+
+  If `streaming?` is true (default), uses Apache POI streaming implementations.
+
+  N.B. The streaming version is an order of magnitude faster than the
+  alternative, so override this default only if you have a very good reason!"
+  ([path]
+   (writer path true))
+  ([path streaming?]
+   (->WorkbookWriter (if streaming? (SXSSFWorkbook.) (XSSFWorkbook.)) path)))
 
 
 (comment
@@ -205,7 +213,7 @@
 
       (newline! t)
       (write! t "Cell")
-      (write! t "Wide Cell" nil 2 1)
+      (write! t "Wide Red Cell" {:font {:color :red}} 2 1)
 
       (newline! t)
       (write! t "Tall Cell" nil 1 2)
@@ -228,10 +236,10 @@
 
 (defn performance-test
   "Write `n-rows` of data to `to-file` and see how long it takes."
-  [to-file n-rows]
+  [to-file n-rows & {:keys [streaming?] :or {streaming? true}}]
   (let [start (System/currentTimeMillis)
         header-style {:border-bottom :thin :font {:bold true}}]
-    (with-open [w (writer to-file)
+    (with-open [w (writer to-file streaming?)
                 sh (sheet-writer w "Test")]
 
       (write! sh "Date" header-style 1 1)
@@ -250,16 +258,29 @@
 
       (println "Wrote rows after" (- (System/currentTimeMillis) start) "ms"))
 
-    (println "Wrote file after" (- (System/currentTimeMillis) start) "ms")))
+    (let [total (- (System/currentTimeMillis) start)]
+      (println "Wrote file after" total "ms")
+      total)))
 
 
 (comment
+  "Testing overall performance, plus looking at streaming vs not streaming."
+
+  ;; To get more detailed profiling output
   (tufte/add-basic-println-handler! {})
-  (performance-test "test.xlsx" 1000) ; 103ms
-  (tufte/profile {} (performance-test "test.xlsx" 10000)) ; 385ms
-  (tufte/profile {} (performance-test "test.xlsx" 100000)) ; 4503ms
-  (performance-test "test.xlsx" 150000) ; 9572ms
-  (performance-test "test.xlsx" 200000) ; 11320ms
-  (performance-test "test.xlsx" 300000) ; 19939ms
-  (performance-test "test.xlsx" 350000) ; OOM error... haha
+
+  ;;; 200,000 rows with and without streaming
+  (tufte/profile {} (performance-test "test.xlsx" 200000 :streaming? true))
+  ;=> 2234
+
+  (tufte/profile {} (performance-test "test.xlsx" 200000 :streaming? false) )
+  ;=> 11187
+
+
+  ;;; 300,000 rows with and without streaming
+  (tufte/profile {} (performance-test "test.xlsx" 500000 :streaming? true))
+  ;=> 5093
+
+  (tufte/profile {} (performance-test "test.xlsx" 500000 :streaming? false))
+  ; ... like a 2 minute delay and then OOM error (with my 8G of ram) ... haha
   )

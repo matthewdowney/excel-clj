@@ -61,9 +61,8 @@
   (:require [clojure.string :as string])
   (:import (org.apache.poi.ss.usermodel
              DataFormat BorderStyle HorizontalAlignment FontUnderline
-             FillPatternType)
-           (org.apache.poi.xssf.usermodel
-             XSSFWorkbook XSSFColor DefaultIndexedColorMap XSSFCell)))
+             FillPatternType Workbook)
+           (org.apache.poi.xssf.usermodel XSSFColor DefaultIndexedColorMap XSSFCell)))
 
 ;;; Code to allow specification of Excel CellStyle objects as nested maps. You
 ;;; might touch this code to add an implementation of `coerce-to-obj` for some
@@ -97,7 +96,7 @@
   so that when it's time to generate a CellStyle object, we can say that we
   know how to go from an attribute map to a Font object for :font attributes,
   from a keyword to a Color object for :color attributes, etc."
-  (fn [^XSSFWorkbook workbook attr-keyword value]
+  (fn [^Workbook workbook attr-keyword value]
     attr-keyword))
 
 ;; Coercions from simple map lookups
@@ -215,11 +214,11 @@
   (coerce-from-map :bottom-border-color colors if-color-not-found))
 
 (defmethod coerce-to-obj :font
-  [^XSSFWorkbook wb _ font-attrs]
+  [^Workbook wb _ font-attrs]
   (do-set-all! (.createFont wb) font-attrs))
 
 (defmethod coerce-to-obj :data-format
-  [^XSSFWorkbook wb _ format]
+  [^Workbook wb _ format]
   (if (instance? DataFormat format)
     format
     (if-let [format' (cond->> format (keyword? format) (get data-formats))]
@@ -263,7 +262,7 @@
   Any of the attributes can be java objects. Alternatively, if a `coerce-to-obj`
   implementation is provided for some attribute (e.g. :font), the attribute can
   be specified as data."
-  [^XSSFWorkbook workbook attrs]
+  [^Workbook workbook attrs]
   (let [attrs' (coerce-nested-to-obj workbook attrs)]
     (try
       (do-set-all! (.createCellStyle workbook) attrs')
