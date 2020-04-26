@@ -4,12 +4,12 @@
             [clojure.java.io :as io]))
 
 (deftest table-test
-  (let [data [{"Date" "2018-01-01" "% Return" 0.05M "USD" 1500.5005M}
-              {"Date" "2018-02-01" "% Return" 0.04M "USD" 1300.20M}
-              {"Date" "2018-03-01" "% Return" 0.07M "USD" 2100.66666666M}]
-        generated (table data)]
+  (let [td [{"Date" "2018-01-01" "% Return" 0.05M "USD" 1500.5005M}
+            {"Date" "2018-02-01" "% Return" 0.04M "USD" 1300.20M}
+            {"Date" "2018-03-01" "% Return" 0.07M "USD" 2100.66666666M}]
+        generated (table td)]
     (testing "Generated grid has the expected shape for the tabular data"
-      (is (= (mapv #(mapv :value %) generated)
+      (is (= (mapv #(mapv data %) generated)
              [["Date" "% Return" "USD"]
               ["2018-01-01" 0.05M 1500.5005M]
               ["2018-02-01" 0.04M 1300.20M]

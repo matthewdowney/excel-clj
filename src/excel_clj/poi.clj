@@ -38,9 +38,6 @@
   (newline! [this]
     "Skip the writer to the next row in the worksheet.")
 
-  (autosize!! [this idx]
-    "Autosize one of the column at `idx`. N.B. this takes forever.")
-
   (sheet* [this]
     "Get the underlying Apache POI XSSFSheet object."))
 
@@ -145,9 +142,6 @@
     (vreset! col-cursor -1)
     this)
 
-  (autosize!! [this idx]
-    (tufte/p :auto-size (.autoSizeColumn sheet idx)))
-
   (sheet* [this]
     sheet)
 
@@ -159,7 +153,8 @@
     this))
 
 
-(defrecord ^:private WorkbookWriter [^Workbook workbook path]
+(defrecord ^:private WorkbookWriter
+  [^Workbook workbook stream-factory owns-created-stream?]
   IWorkbookWriter
   (workbook* [this]
     workbook)
@@ -167,38 +162,67 @@
   Closeable
   (close [this]
     (tufte/p :write-to-disk
-      (with-open [fos (io/output-stream (io/file path))]
-        (.write workbook fos)
-        (.close workbook)))))
+      (if owns-created-stream? ;; We have to close the stream
+        (with-open [fos ^Closeable (stream-factory this)]
+          (.write workbook fos)
+          (.close workbook))
+        (let [fos (stream-factory this)] ;; Client is responsible for stream
+          (.write workbook fos)
+          (.close workbook))))))
 
 
 (defn ^SheetWriter sheet-writer
   "Create a writer for an individual sheet within the workbook."
   [workbook-writer sheet-name]
-  (let [{:keys [^Workbook workbook path]} workbook-writer
+  (let [{:keys [^Workbook workbook]} workbook-writer
         cache (enc/memoize_
-                  (fn [style]
-                    (let [style (enc/nested-merge style/default-style style)]
-                      (style/build-style workbook style))))]
-      (map->SheetWriter
-        {:cell-style-cache cache
-         :sheet (.createSheet workbook ^String sheet-name)
-         :row   (volatile! nil)
-         :row-cursor (volatile! -1)
-         :col-cursor (volatile! -1)})))
+                (fn [style]
+                  (let [style (enc/nested-merge style/default-style style)]
+                    (style/build-style workbook style))))
+        sheet (.createSheet workbook ^String sheet-name)]
+
+    (map->SheetWriter
+      {:cell-style-cache cache
+       :sheet            sheet
+       :row              (volatile! nil)
+       :row-cursor       (volatile! -1)
+       :col-cursor       (volatile! -1)})))
 
 
 (defn ^WorkbookWriter writer
   "Open a writer for Excel workbooks.
 
+  See `stream-writer` for writing to your own streams (maybe you're writing
+  as a web server response, to S3, or otherwise over TCP).
+
   If `streaming?` is true (default), uses Apache POI streaming implementations.
 
   N.B. The streaming version is an order of magnitude faster than the
-  alternative, so override this default only if you have a very good reason!"
+   alternative, so override this default only if you have a good reason!"
   ([path]
    (writer path true))
   ([path streaming?]
-   (->WorkbookWriter (if streaming? (SXSSFWorkbook.) (XSSFWorkbook.)) path)))
+   (map->WorkbookWriter
+     {:workbook (if streaming? (SXSSFWorkbook.) (XSSFWorkbook.))
+      :path path
+      :stream-factory #(io/output-stream (io/file (:path %)))
+      :owns-created-stream? true})))
+
+
+(defn ^WorkbookWriter stream-writer
+  "Open a stream writer for Excel workbooks.
+
+  If `streaming?` is true (default), uses Apache POI streaming implementations.
+
+  N.B. The streaming version is an order of magnitude faster than the
+   alternative, so override this default only if you have a good reason!"
+  ([stream]
+   (stream-writer stream true))
+  ([stream streaming?]
+   (map->WorkbookWriter
+     {:workbook (if streaming? (SXSSFWorkbook.) (XSSFWorkbook.))
+      :stream-factory (constantly stream)
+      :owns-created-stream? false})))
 
 
 (comment
