@@ -1,16 +1,15 @@
 (ns excel-clj.poi
-  "Interface that sits one level above Apache POI.
+  "Exposes a low level cell writer that uses Apache POI.
 
-  Handles all apache POI interaction besides styling (style.clj).
-  See the examples at the bottom of the namespace inside of (comment ...)
-  expressions for how to use the writers."
+  See the `example` and `performance-test` functions at the end of
+  this ns + the adjacent (comment ...) forms for more detail."
   {:author "Matthew Downey"}
   (:require [clojure.java.io :as io]
             [taoensso.encore :as enc]
             [excel-clj.style :as style]
             [clojure.walk :as walk]
             [taoensso.tufte :as tufte])
-  (:import (java.io Closeable)
+  (:import (java.io Closeable BufferedInputStream InputStream)
            (org.apache.poi.ss.usermodel RichTextString Sheet Cell Row Workbook)
            (java.util Date Calendar)
            (org.apache.poi.ss.util CellRangeAddress)
@@ -22,8 +21,10 @@
 
 
 (defprotocol IWorkbookWriter
+  (dissoc-sheet! [this sheet-name]
+    "If there's a sheet with the given name, get rid of it.")
   (workbook* [this]
-    "Get the underlying Apache POI XSSFWorkbook object."))
+    "Get the underlying Apache POI Workbook object."))
 
 
 (defprotocol IWorksheetWriter
@@ -159,6 +160,11 @@
   (workbook* [this]
     workbook)
 
+  (dissoc-sheet! [this sheet-name]
+    (when-let [sh (.getSheet workbook sheet-name)]
+      (.removeSheetAt workbook (.getSheetIndex workbook sh))
+      sh))
+
   Closeable
   (close [this]
     (tufte/p :write-to-disk
@@ -171,6 +177,12 @@
           (.close workbook))))))
 
 
+(defn ^Sheet create-sheet [^Workbook workbook sheet-name]
+  (when-let [sh (.getSheet workbook sheet-name)]
+    (.removeSheetAt workbook (.getSheetIndex workbook sh)))
+  (.createSheet workbook sheet-name))
+
+
 (defn ^SheetWriter sheet-writer
   "Create a writer for an individual sheet within the workbook."
   [workbook-writer sheet-name]
@@ -179,7 +191,7 @@
                 (fn [style]
                   (let [style (enc/nested-merge style/default-style style)]
                     (style/build-style workbook style))))
-        sheet (.createSheet workbook ^String sheet-name)]
+        sheet (create-sheet workbook sheet-name)]
 
     (map->SheetWriter
       {:cell-style-cache cache
@@ -209,13 +221,32 @@
       :owns-created-stream? true})))
 
 
+(defn- ^XSSFWorkbook appendable [path]
+  (XSSFWorkbook. (BufferedInputStream. (io/input-stream path))))
+
+
+(defn ^WorkbookWriter appender
+  "Like `writer`, but allows overwriting individual sheets within a template
+  workbook."
+  ([from-path to-path]
+   (appender from-path to-path true))
+  ([from-path to-path streaming?]
+   (map->WorkbookWriter
+     {:workbook (if streaming?
+                  (SXSSFWorkbook. (appendable from-path))
+                  (appendable from-path))
+      :path to-path
+      :stream-factory #(io/output-stream (io/file (:path %)))
+      :owns-created-stream? true})))
+
+
 (defn ^WorkbookWriter stream-writer
   "Open a stream writer for Excel workbooks.
 
   If `streaming?` is true (default), uses Apache POI streaming implementations.
 
   N.B. The streaming version is an order of magnitude faster than the
-   alternative, so override this default only if you have a good reason!"
+  alternative, so override this default only if you have a good reason!"
   ([stream]
    (stream-writer stream true))
   ([stream streaming?]
@@ -225,10 +256,21 @@
       :owns-created-stream? false})))
 
 
-(comment
-  "For example..."
+(defn ^WorkbookWriter stream-appender
+  "Like `stream-writer`, but allows overwriting individual sheets within a
+  template workbook."
+  ([from-stream to-stream]
+   (stream-appender from-stream to-stream true))
+  ([^InputStream from-stream to-stream streaming?]
+   (map->WorkbookWriter
+     (let [wb (XSSFWorkbook. from-stream)]
+       {:workbook (if streaming? (SXSSFWorkbook. wb) wb)
+        :stream-factory (constantly to-stream)
+        :owns-created-stream? false}))))
 
-  (with-open [w (writer "test.xlsx")
+
+(defn example [file-to-write-to]
+  (with-open [w (writer file-to-write-to)
               t (sheet-writer w "Test")]
     (let [header-style {:border-bottom :thin :font {:bold true}}]
       (write! t "First Col" header-style 1 1)
@@ -253,9 +295,39 @@
       (newline! t)
       (write! t "Wide" nil 2 1)
       (write! t "Wider" nil 3 1)
-      (write! t "Much Wider" nil 5 1)))
+      (write! t "Much Wider" nil 5 1))))
 
-  )
+
+(defn template-example [file-to-write-to]
+  ; The template here has a 'raw' sheet, which contains uptime data for 3 time
+  ; series, and a 'Summary' sheet, wich uses formulas + the raw data to compute
+  ; and plot. We're going to overwrite the 'raw' sheet to fill in the template.
+  (let [template "resources/uptime-template.xlsx"]
+    (with-open [w (appender template file-to-write-to)
+                ; the template sheet to overwrite completely
+                sh (sheet-writer w "raw")]
+
+      (doseq [header ["Date" ; use the same headers as in the template
+                      "Webserver Uptime"
+                      "REST API Uptime"
+                      "WebSocket API Uptime"]]
+        (write! sh header))
+
+      (newline! sh)
+
+      ; then write random uptime values in one hour intervals
+      (let [start-ts (inst-ms #inst"2020-05-01")
+            one-hour (* 1000 60 60)]
+        (dotimes [i 99]
+          (let [row-ts (+ start-ts (* i one-hour))
+                ymd {:data-format :ymd :alignment :left}]
+            (write! sh (Date. ^long row-ts) ymd 1 1))
+
+          ; random uptime values
+          (write! sh (- 1.0 (rand 0.25)))
+          (write! sh (- 1.0 (rand 0.25)))
+          (write! sh (- 1.0 (rand 0.25)))
+          (newline! sh))))))
 
 
 (defn performance-test
@@ -288,8 +360,13 @@
 
 
 (comment
-  "Testing overall performance, plus looking at streaming vs not streaming."
+  "Writing cells very manually"
+  (example "cells.xlsx")
 
+  "Filling in a template with random data"
+  (template-example "filled-in-template.xlsx")
+
+  "Testing overall performance, plus looking at streaming vs not streaming."
   ;; To get more detailed profiling output
   (tufte/add-basic-println-handler! {})
 
