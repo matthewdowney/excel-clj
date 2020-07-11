@@ -12,15 +12,12 @@
   {:author "Matthew Downey"}
   (:require [excel-clj.cell :refer [style data dims wrapped?]]
             [excel-clj.file :as file]
-            [excel-clj.poi :as poi]
-            [excel-clj.style :as style]
             [excel-clj.tree :as tree]
 
             [clojure.string :as string]
-            [clojure.java.io :as io]
 
-            [taoensso.encore :as enc]
-            [taoensso.tufte :as tufte]))
+            [taoensso.tufte :as tufte])
+  (:import (clojure.lang Named)))
 
 
 (set! *warn-on-reflection* true)
@@ -32,7 +29,10 @@
 (defn best-guess-cell-format
   "Try to guess appropriate formatting based on column name and cell value."
   [val column-name]
-  (let [column' (string/lower-case (name column-name))]
+  (let [column' (string/lower-case
+                  (if (instance? Named column-name)
+                    (name column-name)
+                    (str column-name)))]
     (cond
       (and (string? val) (> (count val) 75))
       {:wrap-text true}
@@ -53,32 +53,32 @@
   "Build a lazy sheet grid from `rows`.
 
   Applies default styles to cells which are not already styled, but preserves
-  any existing styles. Additionally, expands any rows which are wrapped with
-  style data to apply the style to each cell of the row.
+  any existing styles.
 
-  See the comment block below this function definition for examples.
+  Additionally, expands any rows which are wrapped with style data to apply the
+  style to each cell of the row. See the comment block below this function
+  definition for examples.
 
   This fn has the same shape as clojure.pprint/print-table."
   ([rows]
-   (table (keys (first rows)) rows))
+   (table (keys (data (first rows))) rows))
   ([ks rows]
    (assert (seq ks) "Columns are not empty.")
-   (let [col-style {:border-bottom :thin :font {:bold true}}]
+   (let [col-style {:border-bottom :thin :font {:bold true}}
+         >row (fn [row-style row-data]
+                (mapv
+                  (fn [key]
+                    (let [cell (get row-data key)]
+                      (style
+                        (if (wrapped? cell)
+                          cell
+                          (style cell (best-guess-cell-format cell key)))
+                        row-style)))
+                  ks))]
      (cons
        (mapv #(style (data %) col-style) ks)
        (for [row rows]
-         (tufte/p :gen-row
-           (let [row-style (style row)
-                 row (data row)]
-             (mapv
-               (fn [key]
-                 (let [cell (get row key)]
-                   (style
-                     (if (wrapped? cell)
-                       cell
-                       (style cell (best-guess-cell-format cell key)))
-                     row-style)))
-               ks))))))))
+         (tufte/p :gen-row (>row (style row) (data row))))))))
 
 
 (comment
@@ -114,65 +114,47 @@
                       (table (tdata 100)))}))
 
 
-;; TODO: (defn tree [])
+(defn- tree->rows [t]
+  (let [total-fmts (sorted-map
+                     0 {:font {:bold true} :border-top :medium}
+                     1 {:border-top :thin :border-bottom :thin})
+        fmts (sorted-map
+               0 {:font {:bold true} :border-bottom :medium}
+               1 {:font {:bold true}}
+               2 {:indention 2}
+               3 {:font {:italic true} :alignment :right})
+
+        get' (fn [m k] (or (get m k) (val (last m))))]
+    (tree/table
+      ;; Insert total rows below nodes with children
+      (fn render [parent node depth]
+        (if-not (tree/leaf? node)
+          (let [combined (tree/fold + node)
+                empty-row (zipmap (keys combined) (repeat nil))]
+            (concat
+              ; header
+              [(style (assoc empty-row "" (name parent)) (get' fmts depth))]
+              ; children
+              (tree/table render node)
+              ; total row
+              [(style (assoc combined "" "") (get' total-fmts depth))]))
+          ; leaf
+          [(style (assoc node "" (name parent)) (get' fmts depth))]))
+      t)))
 
 
 (defn tree
-    "Build a sheet grid from the provided tree of data
-      [Tree Title [[Category Label [Children]] ... [Category Label [Children]]]]
-    with leaves of the shape [Category Label {:column :value}].
+  [t]
+  (let [ks (into [""] (keys (tree/fold + t)))]
+    (table ks (tree->rows t))))
 
-    E.g. The assets section of a balance sheet might be represented by the tree
-    [:balance-sheet
-      [:assets
-       [[:current-assets
-         [[:cash {2018 100M, 2017 90M}]
-          [:inventory {2018 1500M, 2017 1200M}]]]
-        [:investments {2018 50M, 2017 45M}]]]]
 
-    If provided, the formatters argument is a function that takes the integer
-    depth of a category (increases with nesting) and returns a cell format for
-    the row, and total-formatters is the same for rows that are totals."
-    [t & {:keys [headers formatters total-formatters min-leaf-depth data-format]
-          :or {formatters style/default-tree-formatters
-               total-formatters style/default-tree-total-formatters
-               min-leaf-depth 2
-               data-format :accounting}}]
-    (try
-      (let [tabular (tree/accounting-table (second t) :min-leaf-depth min-leaf-depth)
-            fmt-or-max (fn [fs n]
-                         (or (get fs n) (second (apply max-key first fs))))
-            all-colls (or headers
-                          (sequence
-                            (comp
-                              (mapcat keys)
-                              (filter (complement qualified-keyword?))
-                              (distinct))
-                            tabular))
-            header-style {:font {:bold true} :alignment :right}]
-        (concat
-          ;; Title
-          [[(-> (first t)
-                (style {:alignment :center})
-                (dims {:width (inc (count all-colls))}))]]
-
-          ;; Headers
-          [(into [""] (map #(style % header-style)) all-colls)]
-
-          ;; Line items
-          (for [line tabular]
-            (let [total? (::tree/total? line)
-                  style' (or
-                           (fmt-or-max
-                             (if total? total-formatters formatters)
-                             (::tree/depth line))
-                           {})
-                  style' (enc/nested-merge style' {:data-format data-format})]
-              (into [(style (::tree/label line) (if total? {} style'))]
-                    (map #(style (get line %) style') all-colls))))))
-      (catch Exception e
-        (throw (ex-info "Failed to render tree" {:tree t} e)))))
-
+(defn with-title
+  [title [row & _ :as rows]]
+  (let [width (count row)]
+    (cons
+      [(dims title {:width width})]
+      rows)))
 
 ;;; File interaction
 
@@ -296,9 +278,9 @@
 
 (def example-workbook-data
   {"Tree Sheet"
-   (tree
-     ["Mock Balance Sheet for the year ending Dec 31st, 2018"
-      tree/mock-balance-sheet])
+   (let [title "Mock Balance Sheet Ending Dec 31st, 2020"]
+     (with-title (style title {:alignment :center})
+       (tree tree/mock-balance-sheet)))
 
    "Tabular Sheet"
    (table

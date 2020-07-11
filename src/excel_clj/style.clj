@@ -58,7 +58,9 @@
           (coerce-to-obj
             workbook :font {:bold true :font-height-in-points 10}))))"
   {:author "Matthew Downey"}
-  (:require [clojure.string :as string])
+  (:require [clojure.string :as string]
+            [clojure.reflect :as reflect]
+            [rhizome.viz :as viz])
   (:import (org.apache.poi.ss.usermodel
              DataFormat BorderStyle HorizontalAlignment VerticalAlignment
              FillPatternType Workbook VerticalAlignment FontUnderline CellStyle)
@@ -283,70 +285,3 @@
 (def default-style
   "The default cell style."
   {:font {:font-height-in-points 10 :font-name "Arial"}})
-
-(defn merge-all
-  "Recursively merge maps which may be nested.
-      (merge-nested {:foo {:a :b}} {:foo {:c :d}})
-        ; => {:foo {:a :b, :c :d}}"
-  [& maps]
-  (letfn [(merge? [left right]
-            "Either merge maps or select the latter non-map value."
-            (if (and (map? left) (map? right))
-              (merge-2 left right)
-              right))
-          (merge-2 [m1 m2]
-            "Recursively merge the entries in two maps."
-            (reduce #(trampoline merge-entry %1 %2) (or m1 {}) (seq m2)))
-          (merge-entry [m e]
-            "Merge the entry, e, into map m."
-            (let [k (key e) v (val e)]
-              (if (contains? m k)
-                #(assoc m k (merge? (get m k) v))
-                (assoc m k v))))]
-    (reduce merge-2 maps)))
-
-(defn merge-style
-  "Recursively merge the cell's current style with the provided style map,
-  preserving any style that does not conflict."
-  [cell style]
-  (update
-    (if (map? cell) cell {:value cell})
-    :style (fn [s] (if-not s style (merge-all s style)))))
-
-;;; Default table formatting functions to produce styles
-
-(defn best-guess-row-format
-  "Try to guess appropriate formatting based on column name and cell value."
-  [row-data column]
-  (let [column' (string/lower-case column)
-        val (get row-data column)]
-    (cond
-      (and (string? val) (> (count val) 75))
-      {:wrap-text true}
-
-      (or (string/includes? column' "percent") (string/includes? column' "%"))
-      {:data-format :percent}
-
-      (string/includes? column' "date")
-      {:data-format :ymd :alignment :left}
-
-      (decimal? val)
-      {:data-format :accounting}
-
-      :else nil)))
-
-(def default-header-style
-  (constantly
-    {:border-bottom :thin :font {:bold true}}))
-
-;;; Default tree formatting functions to produce styles
-
-(def default-tree-formatters
-  {0 {:font {:bold true} :border-bottom :medium}
-   1 {:font {:bold true}}
-   2 {:indention 2}
-   3 {:font {:italic true} :alignment :right}})
-
-(def default-tree-total-formatters
-  {0 {:font {:bold true} :border-top :medium}
-   1 {:border-top :thin :border-bottom :thin}})
