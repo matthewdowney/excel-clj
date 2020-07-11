@@ -202,12 +202,81 @@
     (file/quick-open! {"Defaults" (table ["" 2018 2017] table-data)})))
 
 
+;;; Helpers to manipulate [[cell]] data structures
+
+
 (defn with-title
-  [title [row & _ :as rows]]
+  "Prepend a centered `title` row to the `grid` with the same width as the
+  first row of the grid."
+  [title [row & _ :as grid]]
   (let [width (count row)]
     (cons
-      [(dims title {:width width})]
-      rows)))
+      [(-> title (dims {:width width}) (style {:alignment :center}))]
+      grid)))
+
+
+(defn transpose
+  "Transpose a grid."
+  [grid]
+  (apply mapv vector grid))
+
+
+(defn juxtapose
+  "Put grids side by side (whereas `concat` works vertically, this works
+  horizontally).
+
+  Optionally, supply some number of blank `padding` columns between the two
+  grids.
+
+  Finds the maximum row width in the left-most grid and pads all of its rows
+  to that length before sticking them together."
+  ([left-grid right-grid]
+   (juxtapose left-grid right-grid 0))
+  ([left-grid right-grid padding]
+   (let [;; First pad the height of both grids
+         height (max (count left-grid) (count right-grid))
+         empty-row []
+         pad-height (fn [xs]
+                      (concat xs (repeat (- height (count xs)) empty-row)))
+
+         ;; Then pad the width of the left grid so that it's uniform
+         row-width (fn [row] (apply + (map (comp :width dims) row)))
+         max-row-width (apply max (map row-width left-grid))
+         pad-to (fn [width row]
+                  (let [cells-needed (- width (row-width row))]
+                    (into row (repeat cells-needed ""))))
+         padded-left-grid (map
+                            (partial pad-to (+ max-row-width padding))
+                            (pad-height left-grid))]
+     (map into padded-left-grid (pad-height right-grid)))))
+
+
+(comment
+  "Example: juxtaposing two grids with different widths and heights"
+  (let [squares (-> (table (for [i (range 10)] {"X" i "X^2" (* i i)}))
+                    (vec)
+                    (update 5 into [(dims "<- This one is 4^2" {:width 2})])
+                    (update 6 into ["^ Juxt should make room for that cell"]))
+        cubes (table (for [i (range 20)] {"X" i "X^3" (* i i i)}))]
+    (file/quick-open!
+      {"Juxtapose" (juxtapose squares cubes)}))
+
+  "Example: A multiplication table"
+  (let [highlight {:fill-pattern :solid-foreground
+                   :fill-foreground-color :yellow}
+
+        grid (for [x (range 1 11)]
+               (for [y (range 1 11)]
+                 (cond-> (* x y) (= x y) (style highlight))))
+
+        cols (map #(style % {:font {:bold true}}) (range 1 11))
+
+        grid (concat [cols] grid)
+        grid (juxtapose (transpose [(cons nil cols)]) grid)]
+    (file/quick-open!
+      {"Transpose & Juxtapose"
+       (with-title "Multiplication Table" grid)})))
+
 
 ;;; File interaction
 
