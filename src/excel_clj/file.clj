@@ -24,7 +24,7 @@
 
 
 (defn write-rows!
-  "Write the rows via the poi/SheetWriter `sh`, returning the max row width."
+  "Write the rows via the `poi/SheetWriter` `sh`, returning the max row width."
   [sh rows-seq]
   (reduce
     (fn [n next-row]
@@ -40,7 +40,7 @@
 
 
 (defn write*
-  "For best performance, using {:streaming true, :auto-size-cols? false}."
+  "For best performance, use `{:streaming true, :auto-size-cols? false}`."
   [workbook poi-writer {:keys [streaming? auto-size-cols?] :as ops}]
   (doseq [[nm rows] workbook
           :let [sh (poi/sheet-writer poi-writer nm)
@@ -101,7 +101,29 @@
   ([workbook stream {:keys [streaming? auto-size-cols?]
                      :or   {streaming? true}
                      :as   ops}]
-   (with-open [w (poi/stream-writer stream)]
+   (with-open [w (poi/stream-writer stream streaming?)]
+     (write* workbook w (assoc ops :streaming? streaming?)))))
+
+
+(defn append! ; see core/append!
+  ([workbook from-path to-path]
+   (append! workbook from-path to-path (default-ops workbook)))
+  ([workbook from-path to-path {:keys [streaming? auto-size-cols?]
+                                :or   {streaming? true}
+                                :as   ops}]
+   (let [f (io/file (force-extension (str to-path) ".xlsx"))]
+     (with-open [w (poi/appender from-path f streaming?)]
+       (write* workbook w (assoc ops :streaming? streaming?)))
+     f)))
+
+
+(defn append-stream! ; see core/append-stream!
+  ([workbook from-stream stream]
+   (append-stream! workbook from-stream stream (default-ops workbook)))
+  ([workbook from-stream stream {:keys [streaming? auto-size-cols?]
+                                 :or   {streaming? true}
+                                 :as   ops}]
+   (with-open [w (poi/stream-appender from-stream stream streaming?)]
      (write* workbook w (assoc ops :streaming? streaming?)))))
 
 

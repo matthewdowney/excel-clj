@@ -1,25 +1,22 @@
 (ns excel-clj.style
-  "The basic unit of spreadsheet data is the cell, which can either be a
-  plain value or a value with style data.
+  "The basic unit of spreadsheet data is the cell, which can be embellished
+  with style data, e.g.
 
-    {:value 0.2345
-     :style {:data-format :percent,
-             :font {:bold true :font-height-in-points 10}}}
+    {:data-format :percent,
+     :font {:bold true :font-height-in-points 10}}
 
   The goal of the style map is to reuse all of the functionality built in to
   the underlying Apache POI objects, but with immutable data structures.
 
-  The primary advantage -- beyond the things we're accustomed to loving about
-  clojure data maps as opposed to mutable objects with getters/setters -- other
-  than declarative syntax is the ease with which we can merge styles as maps
+  The primary advantage is the ease with which we can merge styles as maps
   rather than trying to create some new POI object out of two other objects,
   reading and combining all of their attributes and nested attributes.
 
   ## Mechanics
 
   Style map data are representative of nested calls to the corresponding setter
-  methods in the Apache POI framework starting with a CellStyle object. That is,
-  the above example is roughly interpreted as:
+  methods in the Apache POI framework starting with a `CellStyle` object. That
+  is, the above example is roughly interpreted as:
 
     ;; A CellStyle POI object created under the hood during rendering
     (let [cell-style ...]
@@ -37,10 +34,12 @@
       called with a POI Font object; and
     - translating keywords like :percent to POI objects.
 
-  Both are solved with the coerce-to-obj multimethod, which specifies how to
-  coerce different attributes to POI objects. It has the signature
-    (workbook, attribute, value) => Object
-  and dispatches on the attribute (a keyword).
+  Both are solved with the `coerce-to-obj` multimethod specifying how to
+  coerce different attributes to POI objects, which has the shape
+
+    (fn [workbook attribute value] => Object)
+
+  and dispatches on the `attribute` (a keyword).
 
   We coerce key value pairs to objects from the bottom of the style map upwards,
   meaning that by the time coerce-to-obj is being invoked for some attribute,
@@ -56,7 +55,9 @@
         ;; The {:bold true :font-height-in-points 10} expands recursively
         (.setFont
           (coerce-to-obj
-            workbook :font {:bold true :font-height-in-points 10}))))"
+            workbook :font {:bold true :font-height-in-points 10}))))
+
+  "
   {:author "Matthew Downey"}
   (:require [clojure.string :as string]
             [clojure.reflect :as reflect]
@@ -67,9 +68,11 @@
            (org.apache.poi.xssf.usermodel XSSFColor DefaultIndexedColorMap
                                           XSSFCell XSSFCellStyle XSSFFont XSSFWorkbook)))
 
+
 ;;; Code to allow specification of Excel CellStyle objects as nested maps. You
 ;;; might touch this code to add an implementation of `coerce-to-obj` for some
 ;;; cell style attribute.
+
 
 (defn- do-set!
   "Set an attribute on a Java object & return the object. E.g.
@@ -84,11 +87,10 @@
     (doto obj
       (setter val))))
 
-(defn- do-set-all!
-  [base-object attributes]
-  (reduce
-    (fn [left [attr val]] (do-set! left attr val))
-    base-object attributes))
+
+(defn- do-set-all! [base-object attributes]
+  (reduce-kv do-set! base-object attributes))
+
 
 (defmulti coerce-to-obj
   "For some keyword attribute of a CellStyle object, attempt to coerce clojure
@@ -102,7 +104,9 @@
   (fn [^Workbook workbook attr-keyword value]
     attr-keyword))
 
+
 ;; Coercions from simple map lookups
+
 
 (defmacro ^:private coerce-from-map
   ([attr-keyword coercion-map]
@@ -118,6 +122,7 @@
               (throw)))
         (~otherwise wb# akw# val#)))))
 
+
 (def alignments
   {:general          HorizontalAlignment/GENERAL
    :left             HorizontalAlignment/LEFT
@@ -128,6 +133,7 @@
    :center-selection HorizontalAlignment/CENTER_SELECTION
    :distributed      HorizontalAlignment/DISTRIBUTED})
 
+
 (def valignments
   {:top         VerticalAlignment/TOP
    :center      VerticalAlignment/CENTER
@@ -135,12 +141,14 @@
    :justify     VerticalAlignment/JUSTIFY
    :distributed VerticalAlignment/DISTRIBUTED})
 
+
 (def underlines
   {:single            FontUnderline/SINGLE
    :single-accounting FontUnderline/SINGLE_ACCOUNTING
    :double            FontUnderline/DOUBLE
    :double-accounting FontUnderline/DOUBLE_ACCOUNTING
    :none              FontUnderline/NONE})
+
 
 (def borders
   {:none                BorderStyle/NONE
@@ -157,6 +165,7 @@
    :dash-dot-dot        BorderStyle/DASH_DOT_DOT
    :medium-dash-dot-dot BorderStyle/MEDIUM_DASH_DOT_DOT
    :slanted-dash-dot    BorderStyle/SLANTED_DASH_DOT})
+
 
 (def fill-patterns
   {:no-fill             FillPatternType/NO_FILL
@@ -179,16 +188,19 @@
    :less_dots           FillPatternType/LESS_DOTS
    :least_dots          FillPatternType/LEAST_DOTS})
 
+
 (def data-formats
   {:accounting "_($* #,##0.00_);_($* (#,##0.00);_($* \"-\"??_);_(@_)"
    :number "#.###############"
    :ymd "yyyy-MM-dd"
    :percent "0.00%"})
 
+
 (defn ^XSSFColor rgb-color
   "Create an XSSFColor object from the given r g b values."
   [r g b]
   (XSSFColor. (byte-array [r g b]) (DefaultIndexedColorMap.)))
+
 
 (def colors
   {:white  (rgb-color 255 255 255)
@@ -201,6 +213,7 @@
    :gray   (rgb-color 232 232 232)
    :black  (rgb-color 0 0 0)})
 
+
 (coerce-from-map :alignment alignments)
 (coerce-from-map :vertical-alignment valignments)
 (coerce-from-map :underline underlines)
@@ -209,6 +222,7 @@
 (coerce-from-map :border-right borders)
 (coerce-from-map :border-bottom borders)
 (coerce-from-map :fill-pattern fill-patterns)
+
 
 (letfn [(if-color-not-found [_ _ color]
           (if (and (coll? color) (= (count color) 3))
@@ -224,9 +238,11 @@
   (coerce-from-map :top-border-color colors if-color-not-found)
   (coerce-from-map :bottom-border-color colors if-color-not-found))
 
+
 (defmethod coerce-to-obj :font
   [^Workbook wb _ font-attrs]
   (do-set-all! ^XSSFFont (.createFont wb) font-attrs))
+
 
 (defmethod coerce-to-obj :data-format
   [^Workbook wb _ format]
@@ -239,8 +255,10 @@
           (ex-info {:given format :have (keys data-formats)})
           (throw)))))
 
+
 (defmethod coerce-to-obj :default
   [_ _ x] x)
+
 
 (defn- coerce-nested-to-obj
   "Given an attribute map, start at the most nested layer and work upwards,
@@ -258,6 +276,7 @@
                      (assoc rebuilt a))))
               rebuilt))]
     (trampoline coerce-nested attributes {})))
+
 
 (defn build-style
   "Create a CellStyle from the given attrs using the given workbook
@@ -281,6 +300,7 @@
         (-> "Failed to create cell style."
             (ex-info {:raw-attributes attrs :built-attributes attrs'} e)
             (throw))))))
+
 
 (def default-style
   "The default cell style."

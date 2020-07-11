@@ -1,6 +1,6 @@
 (ns excel-clj.cell
   "A lightweight wrapper over cell values that allows combining both simple
-  and wrapped cells with new stile and dimensions."
+  and wrapped cells with new styles and dimensions."
   {:author "Matthew Downey"}
   (:require [taoensso.encore :as enc]))
 

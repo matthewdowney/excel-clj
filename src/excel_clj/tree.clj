@@ -71,17 +71,6 @@
     (build root)))
 
 
-(defn negate
-  "Invert the sign of every leaf number for a `tree` with leaves of x->number."
-  [tree]
-  (walk/postwalk
-    (fn [x]
-      (if (leaf? x)
-        (zipmap (keys x) (map - (vals x)))
-        x))
-    tree))
-
-
 (comment
   "E.g. to build a file tree..."
   (let [dir? #(.isDirectory %)
@@ -94,6 +83,17 @@
   (fold + *1)
   ;=> {:size 19096768}
   )
+
+
+(defn negate
+  "Invert the sign of every leaf number for a `tree` with leaves of x->number."
+  [tree]
+  (walk/postwalk
+    (fn [x]
+      (if (leaf? x)
+        (zipmap (keys x) (map - (vals x)))
+        x))
+    tree))
 
 
 (def ^{:private true :dynamic true} *depth* nil)
@@ -265,7 +265,7 @@
 
   ;; Print a more complex table illustrating that math
   (def tbl
-    (let [blank-line {"" ""}]
+    (let [blank-line [{"" ""}]]
       (concat
         (with-table-header "Assets" (table assets))
         blank-line

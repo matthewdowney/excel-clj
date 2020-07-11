@@ -210,7 +210,7 @@
   If `streaming?` is true (default), uses Apache POI streaming implementations.
 
   N.B. The streaming version is an order of magnitude faster than the
-   alternative, so override this default only if you have a good reason!"
+  alternative, so override this default only if you have a good reason!"
   ([path]
    (writer path true))
   ([path streaming?]
@@ -302,7 +302,7 @@
   ; The template here has a 'raw' sheet, which contains uptime data for 3 time
   ; series, and a 'Summary' sheet, wich uses formulas + the raw data to compute
   ; and plot. We're going to overwrite the 'raw' sheet to fill in the template.
-  (let [template "resources/uptime-template.xlsx"]
+  (let [template (io/resource "uptime-template.xlsx")]
     (with-open [w (appender template file-to-write-to)
                 ; the template sheet to overwrite completely
                 sh (sheet-writer w "raw")]

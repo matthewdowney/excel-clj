@@ -8,7 +8,7 @@
   The tree and table functions convert tree formatted or tabular data into a
   grid of [[cell]].
 
-  Run the (example) function at the bottom of this namespace to see more."
+  See the (comment) form with examples at the bottom of this namespace."
   {:author "Matthew Downey"}
   (:require [excel-clj.cell :refer [style data dims wrapped?]]
             [excel-clj.file :as file]
@@ -17,7 +17,8 @@
             [clojure.string :as string]
 
             [taoensso.tufte :as tufte])
-  (:import (clojure.lang Named)))
+  (:import (clojure.lang Named)
+           (java.util Date)))
 
 
 (set! *warn-on-reflection* true)
@@ -56,7 +57,7 @@
   any existing styles.
 
   Additionally, expands any rows which are wrapped with style data to apply the
-  style to each cell of the row. See the comment block below this function
+  style to each cell of the row. See the comment form below this function
   definition for examples.
 
   This fn has the same shape as clojure.pprint/print-table."
@@ -137,16 +138,68 @@
               ; children
               (tree/table render node)
               ; total row
-              [(style (assoc combined "" "") (get' total-fmts depth))]))
+              (when (> (count node) 1)
+                [(style (assoc combined "" "") (get' total-fmts depth))])))
           ; leaf
           [(style (assoc node "" (name parent)) (get' fmts depth))]))
       t)))
 
 
 (defn tree
-  [t]
-  (let [ks (into [""] (keys (tree/fold + t)))]
-    (table ks (tree->rows t))))
+  "Build a lazy sheet grid from `tree`, whose leaves are shaped key->number.
+
+  E.g. (tree {:assets {:cash {:usd 100 :eur 100}}})
+
+  See the comment form below this definition for examples."
+  [tree]
+  (let [ks (into [""] (keys (tree/fold + tree)))]
+    (table ks (tree->rows tree))))
+
+
+(comment
+
+  "Example: Trees using the 'tree' helper with default formatting."
+  (let [assets {"Current" {:cash {:usd 100 :eur 100}
+                           :inventory {:usd 500}}
+                "Other" {:loans {:bank {:usd 500}
+                                 :margin {:usd 1000 :eur 30000}}}}
+        liabilities {"Current" {:accounts-payable {:usd 50 :eur 0}}}]
+    (file/quick-open!
+      {"Just Assets"
+       (tree {"Assets" assets})
+
+       "Both in One Tree"
+       (tree
+         {"Accounts"
+          {"Assets" assets
+           ;; Because they're in one tree, assets will sum with liabilities,
+           ;; so we should invert the sign on the liabilities to get a
+           ;; meaningful sum
+           "Liabilities" (tree/negate liabilities)}})
+
+       "Both in Two Trees"
+       (let [diff (tree/fold
+                    - {:assets-sum (tree/fold + assets)
+                       :liabilities-sum (tree/fold - liabilities)})
+             no-header rest]
+         (concat
+           (tree {"Assets" assets})
+           [[""]]
+           (no-header (tree {"Liabilities" liabilities}))
+           [[""]]
+           (no-header (tree {"Assets Less Liabilities" diff}))))}))
+
+  "Example: Trees using `excel-clj.tree/table` and then using the `table`
+  helper."
+  (let [table-data
+        (->> (tree/table tree/mock-balance-sheet)
+             (map
+               (fn [row]
+                 (let [spaces (apply str (repeat (:tree/indent row) "  "))]
+                   (-> row
+                       (dissoc :tree/indent)
+                       (update "" #(str spaces %)))))))]
+    (file/quick-open! {"Defaults" (table ["" 2018 2017] table-data)})))
 
 
 (defn with-title
@@ -172,6 +225,23 @@
    (file/write! workbook path ops)))
 
 
+(defn append!
+  "Merge the `workbook` with the one saved at `from-path`, write it to the
+  given `path`, and return a file object pointing at the written file.
+
+  The workbook is a key value collection of (sheet-name grid), either as map or
+  an association list (if ordering is important).
+
+  The 'merge' logic overwrites sheets of the same name in the workbook at
+  `from-path`, so this function is only capable of appending sheets to a
+  workbook, not appending cells to a sheet."
+  ([workbook from-path path] (file/append! workbook from-path path))
+  ([workbook from-path path {:keys [streaming? auto-size-cols?]
+                             :or   {streaming? true}
+                             :as   ops}]
+   (file/append! workbook from-path path ops)))
+
+
 (defn write-stream!
   "Like `write!`, but for a stream."
   ([workbook stream]
@@ -180,6 +250,16 @@
                      :or   {streaming? true}
                      :as   ops}]
    (file/write-stream! workbook stream ops)))
+
+
+(defn append-stream!
+  "Like `append!`, but for streams."
+  ([workbook from-stream stream]
+   (file/append-stream! workbook from-stream stream))
+  ([workbook from-stream stream {:keys [streaming? auto-size-cols?]
+                                 :or   {streaming? true}
+                                 :as   ops}]
+   (file/append-stream! workbook from-stream stream ops)))
 
 
 (defn write-pdf!
@@ -296,3 +376,29 @@
 
 (defn example []
   (file/quick-open! example-workbook-data))
+
+
+(def example-template-data
+  ;; Some mocked tabular uptime data to inject into the template
+  (let [start-ts (inst-ms #inst"2020-05-01")
+        one-hour (* 1000 60 60)]
+    (for [i (range 99)]
+      {"Date"                 (Date. ^long (+ start-ts (* i one-hour)))
+       "Webserver Uptime"     (- 1.0 (rand 0.25))
+       "REST API Uptime"      (- 1.0 (rand 0.25))
+       "WebSocket API Uptime" (- 1.0 (rand 0.25))})))
+
+
+(comment
+  "Example: Creating a workbooks different kinds of worksheets"
+  (example)
+
+  "Example: Creating a workbook by filling in a template.
+
+  The template here has a 'raw' sheet, which contains uptime data for 3 time
+  series, and a 'Summary' sheet, wich uses formulas + the raw data to compute
+  and plot. We're going to overwrite the 'raw' sheet to fill in the template."
+  (let [template (clojure.java.io/resource "uptime-template.xlsx")
+        new-data {"raw" (table example-template-data)}]
+    (file/open (append! new-data template "filled-in-template.xlsx"))))
+

@@ -1,9 +1,11 @@
 (ns excel-clj.core-test
-  (:require [clojure.test :refer :all]
-            [excel-clj.cell :refer :all]
+  (:require [excel-clj.cell :refer :all]
             [excel-clj.core :refer :all]
             [excel-clj.file :refer [temp]]
+
+            [clojure.test :refer :all]
             [clojure.java.io :as io]))
+
 
 (deftest table-test
   (let [td [{"Date" "2018-01-01" "% Return" 0.05M "USD" 1500.5005M}
@@ -17,11 +19,12 @@
               ["2018-02-01" 0.04M 1300.20M]
               ["2018-03-01" 0.07M 2100.66666666M]])))))
 
+
 (deftest tree-test
-  (let [data ["Title"
-              [["Tree 1" [["Child" {2018 2, 2017 1}]
-                          ["Another" {2018 3, 2017 1}]]]
-               ["Tree 2" [["Child" {2018 -2, 2017 -1}]]]]]]
+  (let [data {"Title"
+              {"Tree 1" {"Child" {2018 2, 2017 1}
+                         "Another" {2018 3, 2017 1}}
+               "Tree 2" {"Child" {2018 -2, 2017 -1}}}}]
     (testing "Renders tree into a grid with a title and total rows."
       (is (= (mapv #(mapv :value %) (tree data)))
           [["Title"]
@@ -39,5 +42,16 @@
     (try
       (testing "Example code snippet writes successfully."
         (write! example-workbook-data temp-file))
+      (finally
+        (io/delete-file temp-file)))))
+
+
+(deftest template-example-test
+  (let [temp-file (io/file (temp ".xlsx"))]
+    (try
+      (testing "Example code snippet writes successfully."
+        (let [template (clojure.java.io/resource "uptime-template.xlsx")
+              new-data {"raw" (table example-template-data)}]
+          (append! new-data template "filled-in-template.xlsx")))
       (finally
         (io/delete-file temp-file)))))
