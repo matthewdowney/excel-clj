@@ -59,14 +59,12 @@
 
   "
   {:author "Matthew Downey"}
-  (:require [clojure.string :as string]
-            [clojure.reflect :as reflect]
-            [rhizome.viz :as viz])
+  (:require [clojure.string :as string])
   (:import (org.apache.poi.ss.usermodel
              DataFormat BorderStyle HorizontalAlignment VerticalAlignment
-             FillPatternType Workbook VerticalAlignment FontUnderline CellStyle)
+             FillPatternType Workbook VerticalAlignment FontUnderline)
            (org.apache.poi.xssf.usermodel XSSFColor DefaultIndexedColorMap
-                                          XSSFCell XSSFCellStyle XSSFFont XSSFWorkbook)))
+                                          XSSFCellStyle XSSFFont XSSFWorkbook)))
 
 
 ;;; Code to allow specification of Excel CellStyle objects as nested maps. You
