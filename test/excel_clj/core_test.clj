@@ -1,6 +1,8 @@
 (ns excel-clj.core-test
   (:require [clojure.test :refer :all]
+            [excel-clj.cell :refer :all]
             [excel-clj.core :refer :all]
+            [excel-clj.file :refer [temp]]
             [clojure.java.io :as io]))
 
 (deftest table-test
@@ -33,7 +35,7 @@
 
 
 (deftest example-test
-  (let [temp-file (io/file (#'excel-clj.core/temp ".xlsx"))]
+  (let [temp-file (io/file (temp ".xlsx"))]
     (try
       (testing "Example code snippet writes successfully."
         (write! example-workbook-data temp-file))

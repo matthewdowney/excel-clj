@@ -10,259 +10,23 @@
 
   Run the (example) function at the bottom of this namespace to see more."
   {:author "Matthew Downey"}
-  (:require [excel-clj.tree :as tree]
+  (:require [excel-clj.cell :refer [style data dims wrapped?]]
+            [excel-clj.file :as file]
+            [excel-clj.poi :as poi]
             [excel-clj.style :as style]
+            [excel-clj.tree :as tree]
+
             [clojure.string :as string]
             [clojure.java.io :as io]
+
             [taoensso.encore :as enc]
-            [excel-clj.poi :as poi]
-            [taoensso.tufte :as tufte])
-  (:import (java.io File)
-           (java.awt Desktop HeadlessException)
-           (org.jodconverter.office DefaultOfficeManagerBuilder)
-           (org.jodconverter OfficeDocumentConverter)
-           (org.apache.poi.ss.usermodel Sheet)
-           (org.apache.poi.xssf.streaming SXSSFSheet)))
+            [taoensso.tufte :as tufte]))
 
 
 (set! *warn-on-reflection* true)
 
 
-;;; Model an Excel document 'cell'.
-
-;;; A cell can be either a plain value (a string, java.util.Date, etc.) or such
-;;; a value wrapped in a map which also includes style and dimension data.
-
-
-(defn wrapped? [x] (::wrapped? x))
-(defn wrapped
-  "If `x` contains cell data wrapped in a map (with style & dimension data),
-  return it as-is. Otherwise return a wrapped version."
-  [x]
-  (if (wrapped? x)
-    x
-    {::wrapped? true ::data x}))
-
-
-(defn style
-  "Get the style specification for `x`, or deep-merge its current style spec
-  with the given `style-map`."
-  ([x]
-   (or (::style x) {}))
-  ([x style-map]
-   (let [style-map (enc/nested-merge (style x) style-map)]
-     (assoc (wrapped x) ::style style-map))))
-
-
-(defn dims
-  "Get the {:width N, :height N} dimension map for `x`, or merge in the given
-  `dims-map` of the same format."
-  ([x]
-   (or (::dims x) {:width 1 :height 1}))
-  ([x dims-map]
-   (let [dims-map (merge (dims x) dims-map)]
-     (assoc (wrapped x) ::dims dims-map))))
-
-
-(defn data
-  "If `x` contains cell data wrapped in a map (with style & dimension data),
-  return the wrapped cell value. Otherwise return as-is."
-  [x]
-  (if (wrapped? x)
-    (::data x)
-    x))
-
-
-;;; Interface: Writing and opening Excel worksheets & PDFs
-
-
-(defn- write-rows!
-  "Write the rows via the poi/SheetWriter `sh`, returning the max row width."
-  [sh rows-seq]
-  (reduce
-    (fn [n next-row]
-      (let [width
-            (count
-              (for [cell next-row]
-                (let [{:keys [width height]} (dims cell)]
-                  (poi/write! sh (data cell) (style cell) width height))))]
-        (poi/newline! sh)
-        (max n width)))
-    0
-    rows-seq))
-
-
-(defn- write [workbook poi-writer {:keys [streaming? auto-size-cols?] :as ops}]
-  (doseq [[nm rows] workbook
-          :let [sh (poi/sheet-writer poi-writer nm)
-                auto-size? (or (true? auto-size-cols?)
-                               (get auto-size-cols? nm))]]
-
-    (when (and streaming? auto-size?)
-      (.trackAllColumnsForAutoSizing ^SXSSFSheet (:sheet sh)))
-
-    (let [n-cols (write-rows! sh rows)]
-      (when auto-size?
-        (dotimes [i n-cols]
-          (.autoSizeColumn ^Sheet (:sheet sh) i))))))
-
-
-(defn default-ops
-  "Decide if sheet columns should be autosized by default based on how many
-  rows there are.
-
-  This check is careful to preserve the laziness of grids as much as possible."
-  [workbook]
-  (reduce
-    (fn [ops [sheet-name sheet-grid]]
-      (if (>= (bounded-count 10000 sheet-grid) 10000)
-        (assoc-in ops [:auto-size-cols? sheet-name] false)
-        (assoc-in ops [:auto-size-cols? sheet-name] true)))
-    {:streaming? true :auto-size-cols? {}}
-    workbook))
-
-
-(defn force-extension [path ext]
-  (let [path (.getCanonicalPath (io/file path))]
-    (if (string/ends-with? path ext)
-      path
-      (let [sep (re-pattern (string/re-quote-replacement File/separator))
-            parts (string/split path sep)]
-        (str
-          (string/join
-            File/separator (if (> (count parts) 1) (butlast parts) parts))
-          "." ext)))))
-
-
-(defn write!
-  "Write the `workbook` to the given `path` and return a file object pointing
-  at the written file.
-
-  The workbook is a key value collection of (sheet-name grid), either as map or
-  an association list (if ordering is important)."
-  ([workbook path]
-   (write! workbook path (default-ops workbook)))
-  ([workbook path {:keys [streaming? auto-size-cols?]
-                   :or   {streaming? true}
-                   :as   ops}]
-   (let [f (io/file (force-extension (str path) ".xlsx"))]
-     (with-open [w (poi/writer f streaming?)]
-       (write workbook w (assoc ops :streaming? streaming?)))
-     f)))
-
-
-(defn write-stream!
-  "Like `write!`, but for a stream."
-  ([workbook stream]
-   (write-stream! workbook stream (default-ops workbook)))
-  ([workbook stream {:keys [streaming? auto-size-cols?]
-                     :or   {streaming? true}
-                     :as   ops}]
-   (with-open [w (poi/stream-writer stream)]
-     (write workbook w (assoc ops :streaming? streaming?)))))
-
-
-(defn temp
-  "Return a (string) path to a temp file with the given extension."
-  [ext]
-  (-> (File/createTempFile "generated-sheet" ext) .getCanonicalPath))
-
-
-(defn convert-pdf!
-  "Convert the `from-document`, either a File or a path to any office document,
-  to pdf format and write the pdf to the given pdf-path.
-
-  Requires OpenOffice. See https://github.com/sbraconnier/jodconverter.
-
-  Returns a File pointing at the PDF."
-  [from-document pdf-path]
-  (let [path (force-extension pdf-path "pdf")
-        office-manager (.build (DefaultOfficeManagerBuilder.))]
-    (.start office-manager)
-    (try
-      (let [document-converter (OfficeDocumentConverter. office-manager)]
-        (.convert document-converter (io/file from-document) (io/file path)))
-      (finally
-        (.stop office-manager)))
-    (io/file path)))
-
-
-(defn write-pdf!
-  "Write the workbook to the given filename and return a file object pointing
-  at the written file.
-
-  Requires OpenOffice. See https://github.com/sbraconnier/jodconverter.
-
-  The workbook is a key value collection of (sheet-name grid), either as map or
-  an association list (if ordering is important)."
-  [workbook path]
-  (let [temp-path (temp ".xlsx")
-        pdf-file (convert-pdf! (write! workbook temp-path) path)]
-    (.delete (io/file temp-path))
-    pdf-file))
-
-
-(defn open
-  "Open the given file path with the default program."
-  [file-path]
-  (try
-    (let [f (io/file file-path)]
-      (.open (Desktop/getDesktop) f)
-      f)
-    (catch HeadlessException e
-      (throw (ex-info "There's no desktop." {:opening file-path} e)))))
-
-
-(defn quick-open
-  "Write a workbook to a temp file & open it. Useful for quick repl viewing."
-  [workbook]
-  (open (write! workbook (temp ".xlsx"))))
-
-
-(defn quick-open-pdf
-  "Write a workbook to a temp file as a pdf & open it. Useful for quick repl
-  viewing."
-  [workbook]
-  (open (write-pdf! workbook (temp ".pdf"))))
-
-
-(comment
-  "Grid examples"
-
-  ;;; Writing a simple grid
-  (let [grid [["A" "B" "C"]
-              [1 2 3]]]
-    (quick-open {"Sheet 1" grid}))
-
-
-  ;;; Writing a grid with a bit more formatting
-  (let [t (java.util.Calendar/getInstance)
-        grid [["String" "Abc"]
-              ["Numbers" 100M 1.234 1234 12345N]
-              ["Date (not styled, styled)" t (style t {:data-format :ymd})]]
-
-        header-style {:border-bottom :thin :font {:bold true}}
-        header-rows [[(-> "Type"
-                          (style header-style)
-                          (dims {:height 2})
-                          (style {:vertical-alignment :center}))
-                      (-> "Examples"
-                          (style header-style)
-                          (dims {:width 4})
-                          (style {:alignment :center :border-bottom :none}))]
-                     (mapv #(style % {:font {:italic true}
-                                      :alignment :center
-                                      :border-bottom :thin})
-                           [nil 1 2 3 4])]
-        excel-file (quick-open {"Sheet 1" (concat header-rows grid)})]
-
-    (try
-      (open (convert-pdf! excel-file (temp ".pdf")))
-      (catch Exception e
-        (println "(Couldn't open a PDF on this platform.)")))))
-
-
-;;; Main interface: build Excel worksheets out of Clojure's data structures.
+;;; Build grids of [[cell]] out of Clojure's data structures
 
 
 (defn best-guess-cell-format
@@ -326,7 +90,7 @@
        "N^2" (* i i)
        "N as %" (/ i 100)}))
 
-  (quick-open
+  (file/quick-open!
     {"My Table" (table (tdata 100)) ;; Write a table
 
      ;; Write a table that highlights rows where N has a whole square root
@@ -409,6 +173,58 @@
       (catch Exception e
         (throw (ex-info "Failed to render tree" {:tree t} e)))))
 
+
+;;; File interaction
+
+
+(defn write!
+  "Write the `workbook` to the given `path` and return a file object pointing
+  at the written file.
+
+  The workbook is a key value collection of (sheet-name grid), either as map or
+  an association list (if ordering is important)."
+  ([workbook path] (file/write! workbook path))
+  ([workbook path {:keys [streaming? auto-size-cols?]
+                   :or   {streaming? true}
+                   :as   ops}]
+   (file/write! workbook path ops)))
+
+
+(defn write-stream!
+  "Like `write!`, but for a stream."
+  ([workbook stream]
+   (file/write-stream! workbook stream))
+  ([workbook stream {:keys [streaming? auto-size-cols?]
+                     :or   {streaming? true}
+                     :as   ops}]
+   (file/write-stream! workbook stream ops)))
+
+
+(defn write-pdf!
+  "Write the workbook to the given filename and return a file object pointing
+  at the written file.
+
+  Requires OpenOffice. See https://github.com/sbraconnier/jodconverter.
+
+  The workbook is a key value collection of (sheet-name grid), either as map or
+  an association list (if ordering is important)."
+  [workbook path]
+  (file/write-pdf! workbook path))
+
+
+(defn quick-open!
+  "Write a workbook to a temp file & open it. Useful for quick repl viewing."
+  [workbook]
+  (file/quick-open! workbook))
+
+
+(defn quick-open-pdf!
+  "Write a workbook to a temp file as a pdf & open it. Useful for quick repl
+  viewing."
+  [workbook]
+  (file/quick-open-pdf! workbook))
+
+
 ;;; Performance tests for order-of-magnitude checks
 
 
@@ -419,6 +235,12 @@
        (do ~@body)
        [(- (System/currentTimeMillis) start#) :ms]))
 
+  (defn example-table [n-rows]
+    (for [i (range n-rows)]
+      {"N" i
+       "N^2" (* i i)
+       "N as %" (/ i 100)}))
+
   (defn do-test
     ([n-rows]
      (do-test n-rows nil))
@@ -427,8 +249,8 @@
        (println "Writing" n "rows...")
        {n (time'
             (if ops
-              (write! {"Sheet 1" (example-table n)} "test.xlsx" ops)
-              (write! {"Sheet 1" (example-table n)} "test.xlsx")))})))
+              (file/write! {"Sheet 1" (example-table n)} "test.xlsx" ops)
+              (file/write! {"Sheet 1" (example-table n)} "test.xlsx")))})))
 
   ;;; (1) Performance with auto-sizing of columns
 
@@ -469,7 +291,7 @@
   )
 
 
-;;; Examples (note that others exist in comment blocks throughout the ns)
+;;; Final examples
 
 
 (def example-workbook-data
@@ -491,33 +313,4 @@
 
 
 (defn example []
-  (quick-open example-workbook-data))
-
-
-(comment
-  ;; This should open an Excel workbook
-  (example)
-
-  ;; This will both open an example excel sheet and write & open a test pdf file
-  ;; with the same contents. On platforms without OpenOffice the convert-pdf!
-  ;; call will most likely fail.
-  (open (convert-pdf! (example) (temp ".pdf")))
-
-  ;; Expose ordering / styling issues in v1.2.X
-  (quick-open {"Test" (table
-                        (for [x (range 20000)]
-                          {"N" x, "N^2" (* x x), "N^3" (* x x x)}))})
-
-  ;; Ballpark performance test
-  (dotimes [_ 5]
-    (time (write! [["Test" (table
-                             (for [x (range 100000)]
-                               {"N" x "N^2" (* x x) "N^3" (* x x x)}))]]
-                  "test.xlsx")))
-  ; "Elapsed time: 1238.133651 msecs"
-  ; "Elapsed time: 1190.656899 msecs"
-  ; "Elapsed time: 1195.8068 msecs"
-  ; "Elapsed time: 1182.257177 msecs"
-  ; "Elapsed time: 1166.420738 msecs"
-  ;=> nil
-  )
+  (file/quick-open! example-workbook-data))

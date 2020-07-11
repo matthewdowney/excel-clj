@@ -1,8 +1,8 @@
 # excel-clj
 
-Declarative generation of Excel documents & PDFs with Clojure from higher level 
-abstractions (tree, table) or via a manual grid specification, with boilerplate-free 
-common sense styling.
+Declarative generation of Excel documents & PDFs with Clojure from higher 
+level abstractions (tree, table) or via a manual grid specification, with 
+boilerplate-free common sense styling.
 
 [CHANGELOG](CHANGELOG.md) | Uses [Break Versioning](https://github.com/ptaoussanis/encore/blob/master/BREAK-VERSIONING.md)
 
