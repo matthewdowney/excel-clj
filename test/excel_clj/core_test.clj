@@ -11,7 +11,7 @@
   (let [td [{"Date" "2018-01-01" "% Return" 0.05M "USD" 1500.5005M}
             {"Date" "2018-02-01" "% Return" 0.04M "USD" 1300.20M}
             {"Date" "2018-03-01" "% Return" 0.07M "USD" 2100.66666666M}]
-        generated (table td)]
+        generated (table-grid td)]
     (testing "Generated grid has the expected shape for the tabular data"
       (is (= (mapv #(mapv data %) generated)
              [["Date" "% Return" "USD"]
@@ -26,7 +26,7 @@
                          "Another" {2018 3, 2017 1}}
                "Tree 2" {"Child" {2018 -2, 2017 -1}}}}]
     (testing "Renders tree into a grid with a title and total rows."
-      (is (= (mapv #(mapv :value %) (tree data)))
+      (is (= (mapv #(mapv :value %) (tree-grid data)))
           [["Title"]
            [nil 2018 2017]
            ["Tree 1" nil nil]
@@ -51,7 +51,7 @@
     (try
       (testing "Example code snippet writes successfully."
         (let [template (clojure.java.io/resource "uptime-template.xlsx")
-              new-data {"raw" (table example-template-data)}]
+              new-data {"raw" (table-grid example-template-data)}]
           (append! new-data template "filled-in-template.xlsx")))
       (finally
         (io/delete-file temp-file)))))

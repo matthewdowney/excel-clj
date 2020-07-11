@@ -13,6 +13,7 @@
   (:require [excel-clj.cell :refer [style data dims wrapped?]]
             [excel-clj.file :as file]
             [excel-clj.tree :as tree]
+            [excel-clj.deprecated :as deprecated]
 
             [clojure.string :as string]
 
@@ -50,7 +51,7 @@
       :else nil)))
 
 
-(defn table
+(defn table-grid
   "Build a lazy sheet grid from `rows`.
 
   Applies default styles to cells which are not already styled, but preserves
@@ -62,7 +63,7 @@
 
   This fn has the same shape as clojure.pprint/print-table."
   ([rows]
-   (table (keys (data (first rows))) rows))
+   (table-grid (keys (data (first rows))) rows))
   ([ks rows]
    (assert (seq ks) "Columns are not empty.")
    (let [col-style {:border-bottom :thin :font {:bold true}}
@@ -92,7 +93,7 @@
        "N as %" (/ i 100)}))
 
   (file/quick-open!
-    {"My Table" (table (tdata 100)) ;; Write a table
+    {"My Table" (table-grid (tdata 100)) ;; Write a table
 
      ;; Write a table that highlights rows where N has a whole square root
      "Highlight Table" (let [highlight {:fill-pattern :solid-foreground
@@ -101,7 +102,7 @@
                                        (when (pos? n)
                                          (let [sqrt (Math/sqrt n)]
                                            (zero? (rem sqrt (int sqrt))))))]
-                         (table
+                         (table-grid
                            (for [row (tdata 100)]
                              (if (square? (row "N"))
                                (style row highlight)
@@ -112,7 +113,7 @@
                       [(-> "My Big Title"
                            (dims {:width 3})
                            (style {:alignment :center}))]
-                      (table (tdata 100)))}))
+                      (table-grid (tdata 100)))}))
 
 
 (defn- tree->rows [t]
@@ -145,7 +146,7 @@
       t)))
 
 
-(defn tree
+(defn tree-grid
   "Build a lazy sheet grid from `tree`, whose leaves are shaped key->number.
 
   E.g. (tree {:assets {:cash {:usd 100 :eur 100}}})
@@ -153,7 +154,7 @@
   See the comment form below this definition for examples."
   [tree]
   (let [ks (into [""] (keys (tree/fold + tree)))]
-    (table ks (tree->rows tree))))
+    (table-grid ks (tree->rows tree))))
 
 
 (comment
@@ -166,10 +167,10 @@
         liabilities {"Current" {:accounts-payable {:usd 50 :eur 0}}}]
     (file/quick-open!
       {"Just Assets"
-       (tree {"Assets" assets})
+       (tree-grid {"Assets" assets})
 
        "Both in One Tree"
-       (tree
+       (tree-grid
          {"Accounts"
           {"Assets" assets
            ;; Because they're in one tree, assets will sum with liabilities,
@@ -183,11 +184,11 @@
                        :liabilities-sum (tree/fold - liabilities)})
              no-header rest]
          (concat
-           (tree {"Assets" assets})
+           (tree-grid {"Assets" assets})
            [[""]]
-           (no-header (tree {"Liabilities" liabilities}))
+           (no-header (tree-grid {"Liabilities" liabilities}))
            [[""]]
-           (no-header (tree {"Assets Less Liabilities" diff}))))}))
+           (no-header (tree-grid {"Assets Less Liabilities" diff}))))}))
 
   "Example: Trees using `excel-clj.tree/table` and then using the `table`
   helper."
@@ -199,7 +200,7 @@
                    (-> row
                        (dissoc :tree/indent)
                        (update "" #(str spaces %)))))))]
-    (file/quick-open! {"Defaults" (table ["" 2018 2017] table-data)})))
+    (file/quick-open! {"Defaults" (table-grid ["" 2018 2017] table-data)})))
 
 
 ;;; Helpers to manipulate [[cell]] data structures
@@ -253,11 +254,11 @@
 
 (comment
   "Example: juxtaposing two grids with different widths and heights"
-  (let [squares (-> (table (for [i (range 10)] {"X" i "X^2" (* i i)}))
+  (let [squares (-> (table-grid (for [i (range 10)] {"X" i "X^2" (* i i)}))
                     (vec)
                     (update 5 into [(dims "<- This one is 4^2" {:width 2})])
                     (update 6 into ["^ Juxt should make room for that cell"]))
-        cubes (table (for [i (range 20)] {"X" i "X^3" (* i i i)}))]
+        cubes (table-grid (for [i (range 20)] {"X" i "X^3" (* i i i)}))]
     (file/quick-open!
       {"Juxtapose" (juxtapose squares cubes)}))
 
@@ -429,10 +430,10 @@
   {"Tree Sheet"
    (let [title "Mock Balance Sheet Ending Dec 31st, 2020"]
      (with-title (style title {:alignment :center})
-       (tree tree/mock-balance-sheet)))
+                 (tree-grid tree/mock-balance-sheet)))
 
    "Tabular Sheet"
-   (table
+   (table-grid
      [{"Date" "2018-01-01" "% Return" 0.05M "USD" 1500.5005M}
       {"Date" "2018-02-01" "% Return" 0.04M "USD" 1300.20M}
       {"Date" "2018-03-01" "% Return" 0.07M "USD" 2100.66666666M}])
@@ -468,6 +469,34 @@
   series, and a 'Summary' sheet, wich uses formulas + the raw data to compute
   and plot. We're going to overwrite the 'raw' sheet to fill in the template."
   (let [template (clojure.java.io/resource "uptime-template.xlsx")
-        new-data {"raw" (table example-template-data)}]
+        new-data {"raw" (table-grid example-template-data)}]
     (file/open (append! new-data template "filled-in-template.xlsx"))))
 
+
+;; Some v1.X backwards compatibility
+
+
+(def ^:deprecated tree (partial deprecated/tree table-grid with-title))
+(def ^:deprecated table deprecated/table)
+
+
+(comment
+  "Example: Using deprecated `tree` and `table` functions"
+  (quick-open!
+    {"tree"  (tree
+               ["Mock Balance Sheet for the year ending Dec 31st, 2018"
+                ["Assets"
+                 [["Current Assets"
+                   [["Cash" {2018 100M, 2017 85M}]
+                    ["Accounts Receivable" {2018 5M, 2017 45M}]]]
+                  ["Investments" {2018 100M, 2017 10M}]
+                  ["Other" {2018 12M, 2017 8M}]]]
+                ["Liabilities & Stockholders' Equity"
+                 [["Liabilities"
+                   [["Current Liabilities"
+                     [["Notes payable" {2018 5M, 2017 8M}]
+                      ["Accounts payable" {2018 10M, 2017 10M}]]]
+                    ["Long-term liabilities" {2018 100M, 2017 50M}]]]
+                  ["Equity"
+                   [["Common Stock" {2018 102M, 2017 80M}]]]]]])
+     "table" (table (for [n (range 100)] {"X" n "X^2" (* n n)}))}))
