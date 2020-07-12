@@ -8,7 +8,7 @@ boilerplate-free common sense styling.
 
 Lein:
 ```
-[org.clojars.mjdowney/excel-clj "1.2.0-SNAPSHOT"]
+[org.clojars.mjdowney/excel-clj "2.0.0-SNAPSHOT"]
 ```
 
 - [Getting Started](#getting-started)
@@ -19,7 +19,6 @@ Lein:
     - [What are the options for styling?](#what-are-the-options-for-styling?)
     - [Grids](#grids)
     - [Templates](#templates)
-    - [More Examples](#more-examples)
 - [Roadmap](#roadmap)
 
 ## Getting Started

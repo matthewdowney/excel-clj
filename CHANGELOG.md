@@ -18,6 +18,11 @@
 - New constructors to build grids from tables and trees (`table-grid` and 
   `tree-grid`), which supplant the deprecated constructors from v1.x (`tree` 
   and `table`)
+  
+## [1.3.3] - 2020-07-11
+### Fixed
+- Bug where columns would only auto resize up until 'J'
+- Unnecessary Rhizome dependency causing headaches in headless environments
 
 ## [1.3.2] - 2020-04-15
 ### Fixed
