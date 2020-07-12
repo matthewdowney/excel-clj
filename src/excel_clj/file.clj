@@ -211,7 +211,6 @@
                                       :border-bottom :thin})
                            [nil 1 2 3 4])]
         excel-file (quick-open! {"Sheet 1" (concat header-rows grid)})]
-
     (try
       (open (convert-pdf! excel-file (temp ".pdf")))
       (catch Exception e

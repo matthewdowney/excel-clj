@@ -125,8 +125,19 @@
                1 {:font {:bold true}}
                2 {:indention 2}
                3 {:font {:italic true} :alignment :right})
+        num-format {:data-format :accounting}
 
-        get' (fn [m k] (or (get m k) (val (last m))))]
+        get' (fn [m k] (or (get m k) (val (last m))))
+        style-data (fn [row style-map]
+                     (let [label-key ""]
+                       (->> row
+                            (map (fn [[k v]]
+                                   (if-not (= k label-key)
+                                     [k (-> v
+                                            (style num-format)
+                                            (style style-map))]
+                                     [k v])))
+                            (into {}))))]
     (tree/table
       ;; Insert total rows below nodes with children
       (fn render [parent node depth]
@@ -140,9 +151,9 @@
               (tree/table render node)
               ; total row
               (when (> (count node) 1)
-                [(style (assoc combined "" "") (get' total-fmts depth))])))
+                [(style-data (assoc combined "" "") (get' total-fmts depth))])))
           ; leaf
-          [(style (assoc node "" (name parent)) (get' fmts depth))]))
+          [(style-data (assoc node "" (name parent)) (get' fmts (max depth 2)))]))
       t)))
 
 
@@ -357,6 +368,36 @@
   (file/quick-open-pdf! workbook))
 
 
+;; Some v1.X backwards compatibility
+
+
+(def ^:deprecated tree (partial deprecated/tree table-grid with-title))
+(def ^:deprecated table deprecated/table)
+(def ^:deprecated quick-open quick-open!)
+
+
+(comment
+  "Example: Using deprecated `tree` and `table` functions"
+  (quick-open!
+    {"tree"  (tree
+               ["Mock Balance Sheet for the year ending Dec 31st, 2018"
+                ["Assets"
+                 [["Current Assets"
+                   [["Cash" {2018 100M, 2017 85M}]
+                    ["Accounts Receivable" {2018 5M, 2017 45M}]]]
+                  ["Investments" {2018 100M, 2017 10M}]
+                  ["Other" {2018 12M, 2017 8M}]]]
+                ["Liabilities & Stockholders' Equity"
+                 [["Liabilities"
+                   [["Current Liabilities"
+                     [["Notes payable" {2018 5M, 2017 8M}]
+                      ["Accounts payable" {2018 10M, 2017 10M}]]]
+                    ["Long-term liabilities" {2018 100M, 2017 50M}]]]
+                  ["Equity"
+                   [["Common Stock" {2018 102M, 2017 80M}]]]]]])
+     "table" (table (for [n (range 100)] {"X" n "X^2" (* n n)}))}))
+
+
 ;;; Performance tests for order-of-magnitude checks
 
 
@@ -445,7 +486,7 @@
 
 
 (defn example []
-  (file/quick-open! example-workbook-data))
+  (quick-open! example-workbook-data))
 
 
 (def example-template-data
@@ -471,32 +512,3 @@
   (let [template (clojure.java.io/resource "uptime-template.xlsx")
         new-data {"raw" (table-grid example-template-data)}]
     (file/open (append! new-data template "filled-in-template.xlsx"))))
-
-
-;; Some v1.X backwards compatibility
-
-
-(def ^:deprecated tree (partial deprecated/tree table-grid with-title))
-(def ^:deprecated table deprecated/table)
-
-
-(comment
-  "Example: Using deprecated `tree` and `table` functions"
-  (quick-open!
-    {"tree"  (tree
-               ["Mock Balance Sheet for the year ending Dec 31st, 2018"
-                ["Assets"
-                 [["Current Assets"
-                   [["Cash" {2018 100M, 2017 85M}]
-                    ["Accounts Receivable" {2018 5M, 2017 45M}]]]
-                  ["Investments" {2018 100M, 2017 10M}]
-                  ["Other" {2018 12M, 2017 8M}]]]
-                ["Liabilities & Stockholders' Equity"
-                 [["Liabilities"
-                   [["Current Liabilities"
-                     [["Notes payable" {2018 5M, 2017 8M}]
-                      ["Accounts payable" {2018 10M, 2017 10M}]]]
-                    ["Long-term liabilities" {2018 100M, 2017 50M}]]]
-                  ["Equity"
-                   [["Common Stock" {2018 102M, 2017 80M}]]]]]])
-     "table" (table (for [n (range 100)] {"X" n "X^2" (* n n)}))}))
