@@ -104,17 +104,17 @@
 
 
 (defn- write-rows!
-  "Write the rows via the given sheet-writer, returning the number of rows
-  written."
+  "Write the rows via the given sheet-writer, returning [the number of rows
+  written, number of columns written]."
   [sheet-writer rows-seq]
   (reduce
-    (fn [n next-row]
+    (fn [[rows cols] next-row]
       (doseq [cell next-row]
         (let [{:keys [width height]} (dims cell)]
           (poi/write! sheet-writer (data cell) (style cell) width height)))
       (poi/newline! sheet-writer)
-      (inc n))
-    0
+      [(inc rows) (max cols (count next-row))])
+    [0 0]
     rows-seq))
 
 
@@ -129,10 +129,10 @@
     (with-open [w (poi/writer f)]
       (doseq [[nm rows] workbook
               :let [sh (poi/sheet-writer w nm)
-                    n-written (write-rows! sh rows)]]
+                    [rows-written cols-written] (write-rows! sh rows)]]
         ;; Only auto-size columns for small sheets, otherwise it takes forever
-        (when (< n-written 2000)
-          (dotimes [i 10]
+        (when (< rows-written 2000)
+          (dotimes [i cols-written]
             (poi/autosize!! sh i)))))
     f))
 

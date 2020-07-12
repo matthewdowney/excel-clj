@@ -1,5 +1,10 @@
 # Change Log
 
+## [1.3.3] - 2020-07-11
+### Fixed
+- Bug where columns would only auto resize up until 'J'
+- Unnecessary Rhizome dependency causing headaches in headless environments
+
 ## [1.3.2] - 2020-04-15
 ### Fixed
 - Bug introduced in v1.3.1 where adjacent cells with width > 1 cause an 
