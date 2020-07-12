@@ -1,9 +1,23 @@
 # Change Log
 
-## [1.3.3] - 2020-07-11
-### Fixed
-- Bug where columns would only auto resize up until 'J'
-- Unnecessary Rhizome dependency causing headaches in headless environments
+## [2.0.0] - TBD
+### Changed
+- Now uses the POI streaming writer by default (~10x performance gain on 
+  sheets > 100k rows)
+- Separated out writer abstractions in [poi.clj](src/excel_clj/poi.clj) to 
+  allow using a lower-level POI interface
+- Simplified & rewrote [tree.clj](src/excel_clj/tree.clj)
+- Better wrapping for styling and dimension data in 
+  [cell.clj](src/excel_clj/cell.clj)
+
+### Added 
+- Support for merging workbooks, so you can have a template which uses formulas
+  which act on data from some named sheet, and then fill in that named sheet.
+- New top-level helpers for working with grid (`[[cell]]`) data structures
+- Vertical as well as horizontal merged cells
+- New constructors to build grids from tables and trees (`table-grid` and 
+  `tree-grid`), which supplant the deprecated constructors from v1.x (`tree` 
+  and `table`)
 
 ## [1.3.2] - 2020-04-15
 ### Fixed
