@@ -11,6 +11,9 @@ Lein:
 [org.clojars.mjdowney/excel-clj "2.0.0-SNAPSHOT"]
 ```
 
+> Note: Ongoing v1.x support can be found on the 
+[`version-1` branch](https://github.com/matthewdowney/excel-clj/tree/version-1).
+
 - [Getting Started](#getting-started)
     - [Tables](#tables)
     - [Trees](#trees)
