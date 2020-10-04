@@ -1,5 +1,9 @@
 # excel-clj
 
+> NOTE: This is not the most recent version of `excel-clj`. I will continue to
+  solve issues and fix bugs for version 1.x,  but new projects are encouraged 
+  to use the most up to date version of the software, available on the main branch.
+
 Declarative generation of Excel documents & PDFs with Clojure from higher level 
 abstractions (tree, table) or via a manual grid specification, with boilerplate-free 
 common sense styling.
