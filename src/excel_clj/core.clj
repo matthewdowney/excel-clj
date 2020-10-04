@@ -28,13 +28,16 @@
 ;;; Build grids of [[cell]] out of Clojure's data structures
 
 
+(defn- name' [x]
+  (if (instance? Named x)
+    (name x)
+    (str x)))
+
+
 (defn best-guess-cell-format
   "Try to guess appropriate formatting based on column name and cell value."
   [val column-name]
-  (let [column' (string/lower-case
-                  (if (instance? Named column-name)
-                    (name column-name)
-                    (str column-name)))]
+  (let [column' (string/lower-case (name' column-name))]
     (cond
       (and (string? val) (> (count val) 75))
       {:wrap-text true}
@@ -146,14 +149,14 @@
                 empty-row (zipmap (keys combined) (repeat nil))]
             (concat
               ; header
-              [(style (assoc empty-row "" (name parent)) (get' fmts depth))]
+              [(style (assoc empty-row "" (name' parent)) (get' fmts depth))]
               ; children
               (tree/table render node)
               ; total row
               (when (> (count node) 1)
                 [(style-data (assoc combined "" "") (get' total-fmts depth))])))
           ; leaf
-          [(style-data (assoc node "" (name parent)) (get' fmts (max depth 2)))]))
+          [(style-data (assoc node "" (name' parent)) (get' fmts (max depth 2)))]))
       t)))
 
 
@@ -371,9 +374,19 @@
 ;; Some v1.X backwards compatibility
 
 
-(def ^:deprecated tree (partial deprecated/tree table-grid with-title))
-(def ^:deprecated table deprecated/table)
-(def ^:deprecated quick-open quick-open!)
+(def ^:deprecated tree
+  "Deprecated in favor of `tree-grid`."
+  (partial deprecated/tree table-grid with-title))
+
+
+(def ^:deprecated table
+  "Deprecated in favor of `table-grid`."
+  deprecated/table)
+
+
+(def ^:deprecated quick-open
+  "Deprecated in favor of `quick-open!`."
+  quick-open!)
 
 
 (comment

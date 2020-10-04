@@ -3,7 +3,8 @@
 
   Use ordered maps (like array-map) to enforce order."
   {:author "Matthew Downey"}
-  (:require [clojure.walk :as walk]))
+  (:require [clojure.walk :as walk])
+  (:import (clojure.lang Named)))
 
 
 (defn leaf?
@@ -97,6 +98,7 @@
 
 
 (def ^{:private true :dynamic true} *depth* nil)
+(defn- ->str [x] (if (instance? Named x) (name x) (str x)))
 (defn table
   "Given `(fn f [parent-key node depth] => row-map)`, convert `tree` into a
   table of `[row]`.
@@ -112,7 +114,7 @@
      (fn render [parent node depth]
        (let [row (fold (fn [_ _] nil) node)]
          (cons
-           (assoc row "" (name parent) :tree/indent depth)
+           (assoc row "" (->str parent) :tree/indent depth)
            (when-not (leaf? node) (table render node)))))
      tree))
   ([f tree]
@@ -131,7 +133,7 @@
      (cons
        (assoc
          (combine-with node)
-         "" (name parent)
+         "" (->str parent)
          :tree/indent depth)
        (when-not (leaf? node) (table render node))))))
 
@@ -147,10 +149,10 @@
        (let [combined (combine-with node)
              empty-row (zipmap (keys combined) (repeat nil))]
          (concat
-           [(assoc empty-row "" (name parent) :tree/indent depth)] ; header
+           [(assoc empty-row "" (->str parent) :tree/indent depth)] ; header
            (table render node) ; children
            [(assoc combined "" "" :tree/indent depth)])) ; total
-       [(assoc node "" (name parent) :tree/indent depth)]))))
+       [(assoc node "" (->str parent) :tree/indent depth)]))))
 
 
 (defn indent

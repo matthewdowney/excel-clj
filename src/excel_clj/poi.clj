@@ -4,10 +4,12 @@
   See the `example` and `performance-test` functions at the end of
   this ns + the adjacent (comment ...) forms for more detail."
   {:author "Matthew Downey"}
-  (:require [clojure.java.io :as io]
-            [taoensso.encore :as enc]
-            [excel-clj.style :as style]
+  (:require [excel-clj.style :as style]
+
+            [clojure.java.io :as io]
             [clojure.walk :as walk]
+
+            [taoensso.encore :as enc]
             [taoensso.tufte :as tufte])
   (:import (java.io Closeable BufferedInputStream InputStream)
            (org.apache.poi.ss.usermodel RichTextString Sheet Cell Row Workbook)
