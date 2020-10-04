@@ -163,12 +163,15 @@
 (defn tree-grid
   "Build a lazy sheet grid from `tree`, whose leaves are shaped key->number.
 
-  E.g. (tree {:assets {:cash {:usd 100 :eur 100}}})
+  E.g. (tree-grid {:assets {:cash {:usd 100 :eur 100}}})
 
   See the comment form below this definition for examples."
-  [tree]
-  (let [ks (into [""] (keys (tree/fold + tree)))]
-    (table-grid ks (tree->rows tree))))
+  ([tree]
+   (let [ks (into [""] (keys (tree/fold + tree)))]
+     (tree-grid ks tree)))
+  ([ks tree]
+   (let [ks (into [""] (remove #{""}) ks)] ;; force the "" col to come first
+     (table-grid ks (tree->rows tree)))))
 
 
 (comment

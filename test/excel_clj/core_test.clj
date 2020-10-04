@@ -41,6 +41,7 @@
   (let [temp-file (io/file (temp ".xlsx"))]
     (try
       (testing "Example code snippet writes successfully."
+        (println "Writing example workbook...")
         (write! example-workbook-data temp-file))
       (finally
         (io/delete-file temp-file)))))
@@ -50,6 +51,7 @@
   (let [temp-file (io/file (temp ".xlsx"))]
     (try
       (testing "Example code snippet writes successfully."
+        (println "Writing example template...")
         (let [template (clojure.java.io/resource "uptime-template.xlsx")
               new-data {"raw" (table-grid example-template-data)}]
           (append! new-data template "filled-in-template.xlsx")))
