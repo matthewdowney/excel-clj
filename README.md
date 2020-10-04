@@ -1,179 +1,172 @@
 # excel-clj
 
-Declarative generation of Excel documents & PDFs with Clojure from higher level 
-abstractions (tree, table) or via a manual grid specification, with boilerplate-free 
-common sense styling.
+Declarative generation of Excel documents & PDFs with Clojure from higher 
+level abstractions (tree, table) or via a manual grid specification, with 
+boilerplate-free common sense styling.
 
 [CHANGELOG](CHANGELOG.md) | Uses [Break Versioning](https://github.com/ptaoussanis/encore/blob/master/BREAK-VERSIONING.md)
 
 Lein:
 ```
-[org.clojars.mjdowney/excel-clj "1.3.3"]
+[org.clojars.mjdowney/excel-clj "2.0.0"]
 ```
+
+> Note: Ongoing v1.x support can be found on the 
+[`version-1` branch](https://github.com/matthewdowney/excel-clj/tree/version-1).
 
 - [Getting Started](#getting-started)
     - [Tables](#tables)
     - [Trees](#trees)
     - [PDF Generation](#pdf-generation)
-    - [Table Styling](#table-styling)
-    - [Tree Styling](#tree-styling)
-    - [Manual Styling](#manual-styling)
-    - [Grid Format & Cell Merging](#grid-format-&-cell-merging)
+    - [Style & Cell Merging](#style-&-cell-merging)
+    - [What are the options for styling?](#what-are-the-options-for-styling?)
+    - [Grids](#grids)
+    - [Templates](#templates)
 - [Roadmap](#roadmap)
-    - [Tree flexibility](#roadmap)
-    - [Templates](#roadmap)
-    - [Reading & editing](#roadmap)
-    - [Formulas](#roadmap)
 
 ## Getting Started
 
-All of the namespaces have an `example` function at the end; they're intended to
-be browsable and easy to interact with to glean information beyond what's here
-in a the readme.
+All of the namespaces have a `comment` form at the end (as well as throughout) 
+with example usage; they're intended to be browsable and easy to interact with 
+to glean information beyond what's here in a the readme.
+
+You can use this library at two levels. For a low level, `Writer`-style 
+interface, see [poi.clj](src/excel_clj/poi.clj) and the accompanying `comment`
+forms. For high level usage, read on!
 
 Start by skimming this and then browsing [core.clj](src/excel_clj/core.clj).
 
-Tests are run with
-
-```clojure
-lein test
-```
-
 ### Tables
 Though Excel is much more than a program for designing tabular layouts, a table
-is a common abstraction that we impose on our data.
+is a common abstraction imposed on Excel data.
 
 ```clojure
 (require '[excel-clj.core :as excel])
-=> nil
+
 (def table-data
-  [{"Date" "2018-01-01" "% Return" 0.05M "USD" 1500.5005M}
-   {"Date" "2018-02-01" "% Return" 0.04M "USD" 1300.20M}
-   {"Date" "2018-03-01" "% Return" 0.07M "USD" 2100.66666666M}])
-=> #'user/table-data
+  [{"Date" #inst"2018-01-01" "% Return" 0.05M "USD" 1500.5005M}
+   {"Date" #inst"2018-02-01" "% Return" 0.04M "USD" 1300.20M}
+   {"Date" #inst"2018-03-01" "% Return" 0.07M "USD" 2100.66666666M}])
+
 (let [;; A workbook is any [key value] seq of [sheet-name, sheet-grid].
-      ;; Convert the table to a grid with the table function.
-      workbook {"My Generated Sheet" (excel/table table-data)}]
-  (excel/quick-open workbook))
+      ;; Convert the table to a grid with the table-grid function.
+      workbook {"My Generated Sheet" (excel/table-grid table-data)}]
+  (excel/quick-open! workbook))
 ```
 
 ![An excel sheet is opened](resources/quick-open-table.png)
 
+> Note: The examples here use `quick-open!` to ... quickly open the workbook. 
+  You would use `write!` to write to some location on disk, or `write-stream!` 
+  for writing elsewhere.
 
 ### Trees
 
-Sometimes -- frequently for accounting documents -- we use spreadsheets to sum 
+Sometimes — frequently for accounting documents — we use spreadsheets to sum 
 categories of numbers which are themselves broken down into subcategories.
 
 For example, a balance sheet shows a company's assets & liabilities by summing
 the balances corresponding to an account hierarchy.
 
 ```clojure
-(def balance-sheet
-  ["Mock Balance Sheet"
-   [["Assets"
-     [["Current Assets"
-       [["Cash" {2018 100M, 2017 85M}]
-        ["Accounts Receivable" {2018 5M, 2017 45M}]]]
-      ["Investments" {2018 100M, 2017 10M}]
-      ["Other" {2018 12M, 2017 8M}]]]
-    ["Liabilities & Stockholders' Equity"
-     [["Liabilities"
-       [["Current Liabilities"
-         [["Notes payable" {2018 5M, 2017 8M}]
-          ["Accounts payable" {2018 10M, 2017 10M}]]]
-        ["Long-term liabilities" {2018 100M, 2017 50M}]]]
-      ["Equity"
-       [["Common Stock" {2018 102M, 2017 80M}]]]]]]])
+(def assets
+  {"Current Assets" {"Cash"                {2018 100M, 2017 85M}
+                     "Accounts Receivable" {2018 5M, 2017 45M}}
+   "Investments"    {2018 100M, 2017 10M}
+   "Other"          {2018 12M, 2017 8M}})
 
-=> #'user/balance-sheet
-(excel/quick-open {"Balance Sheet" (excel/tree balance-sheet)})
+(def liabilities
+  {"Liabilities"
+   {"Current Liabilities"
+    {"Notes payable"    {2018 5M, 2017 8M}
+     "Accounts payable" {2018 10M, 2017 10M}}
+    "Long-term liabilities"
+    {2018 100M, 2017 50M}}
+   "Equity"
+   {"Common Stock" {2018 102M, 2017 80M}}})
+```
+
+We might choose to e.g. treat each one as a tree and stack them vertically, with 
+a title at the top:
+
+```clojure
+(let [assets (tree-grid {"Assets" assets})
+      lbs (tree-grid {"Liabilities & Stockholders' Equity" liabilities})
+      remove-headers rest]
+  (quick-open!
+    {"Balance Sheet"
+     (with-title "Mock Balance Sheet"
+       (concat assets (remove-headers lbs)))}))
 ```
 
 ![An excel sheet is opened](resources/quick-open-tree.png)
 
-Trees are pretty flexible — the only requirement that we impose is that their
-leaves have the format `[string-label, map-of-numbers]`. We construct trees 
-using the same arguments we'd give to `clojure.core/tree-seq`, plus a walk 
-function. 
+Trees are pretty flexible — browse the [tree.clj](src/excel_clj/tree.clj) 
+namespace for more examples of things to do with them. 
 
-We could make a tree for some part of our file system for example:
-
-```clojure
-(require '[excel-clj.tree :as tree] '[clojure.java.io :as io])
-=> nil
-
-(let [src-tree
-      (tree/walk
-        (fn [f xs]
-          (if-not (seq xs)
-            [(.getName f) {:size (.length f)}]
-            [(str (.getName f) "/") xs]))
-        #(.isDirectory %) #(.listFiles %) (io/file "."))]
-  (excel/quick-open 
-    {"Source Tree" (excel/tree ["Source" [src-tree]] :data-format :number)}))
-```
-
-![An excel sheet is opened](resources/file-tree.png)
+In my own usage of this library I frequently find myself manipulating trees of 
+accounting data using `tree/fold` and then stacking together trees to 
+demonstrate addition, subtraction, and multiplication (e.g. for exchange rates) 
+of different subsets of data, culminating in one "bottom line" tree that 
+contains final result of those calculations.
 
 
 ### PDF Generation
 
 If you're on a system that uses an OpenOffice implementation of Excel, PDF 
-generation is similarly simple.
+generation works the same was as creating a spreadsheet:
 
 ```clojure
-(excel/quick-open-pdf 
-  {"Mock Balance Sheet" (excel/tree balance-sheet) 
-   "Some Table Data" (excel/table table-data)})
+(excel/quick-open-pdf!
+  {"Mock Balance Sheet" (excel/tree-grid tree/mock-balance-sheet) 
+   "Some Table Data" (excel/table-grid table-data)})
 ```
 
 ![A PDF is opened](resources/quick-open-pdf.png)
 
+### Style & Cell Merging
 
-### Table Styling
+Each workbook is a map: `{sheet-name [[cell]]}`. Each `cell` is either
+  1. A plain value, e.g. `"abc"`, `#inst"2020-01-01"`, `110.5M`, `0.0001`; or
+  2. An embellished value, including style and dimension data, eg:
+     ```clojure
+     (require '[excel-clj.cell :as cell])
 
-The `table` function provides hooks to add custom styling without touching 
-the generated grid, within the context of the table abstraction.
+     (def cell
+       (let [header-style {:border-bottom :thin :font {:bold true}}]
+         (-> "Header"
+             (cell/style header-style)
+             (cell/dims {:height 2})
+             (cell/style {:vertical-alignment :center}))))
 
-(More on the syntax of the style data in _Manual Styling_.)
+     (clojure.pprint/pprint cell)
+     ; #:excel{:wrapped? true,
+     ;         :data "Header",
+     ;         :style
+     ;         {:border-bottom :thin,
+     ;          :font {:bold true},
+     ;          :vertical-alignment :center},
+     ;         :dims {:width 1, :height 2}}
 
-- The `:data-style` keyword arg is a fn `(row-map, column-name) => style map`
-- The `:header-style` keyword arg is a fn `(column name) => style map`
-
-For instance, to highlight rows in our table where percent return is less than 
-5%:
-
+So you could e.g. write an (ugly) grid with:
 ```clojure
-(letfn [(highlight-below-5% [row-data col-name]
-          (when (< (row-data "% Return") 0.05M)
-            {:fill-pattern :solid-foreground
-             :fill-foreground-color :yellow}))]
-  (excel/quick-open
-    {"My Generated Sheet" (excel/table table-data :data-style highlight-below-5%)}))
+(let [grid [["A" (cell/style "B" {:font {:bold true}}) "C"]
+            [1 2 (cell/dims 3 {:width 3 :height 3})]]]
+  (excel/quick-open! {"Sheet 1" grid}))
 ```
 
-![An excel spreadsheet with one row highlighted](resources/manual-formatting.png)
+![An ugly grid](resources/ugly-grid.png)
 
-### Tree Styling
-
-The tree function provides similar hooks to style the tree elements based on
-their nested depth. Both keyword arguments expect a fn 
-`(integer-depth) => style map` where the integer depth increases with nesting.
-
-- `:total-formatters` is a function that controls styling for tree rows that 
-  display totals of multiple subcategories
-- `:formatters` is a function that controls styling for the rest of the tree
-
-### Manual Styling
+### What are the options for styling?
 
 The code in this library wraps [Apache POI](https://poi.apache.org/). For 
 styling, the relevant POI object is [CellStyle](https://poi.apache.org/apidocs/dev/org/apache/poi/ss/usermodel/CellStyle.html).
 
-In order to insulate code from Java objects, style specification is done via maps,
-for instance the style we saw above to highlight a row was:
+In order to insulate code from Java objects, style specification is done via 
+maps, for instance the style to highlight a cell would be:
 ```clojure 
-{:fill-pattern :solid-foreground, :fill-foreground-color :yellow}
+{:fill-pattern :solid-foreground
+ :fill-foreground-color :yellow}
 ```
 
 Under the hood however, all of the key/value pairs in the style maps correspond 
@@ -190,50 +183,71 @@ If you're interested in greater detail, see the namespace documentation for
 [style.clj](src/excel_clj/style.clj), otherwise it's sufficient to know that enums are keyword-ized and
 colors are either given as keywords (`:yellow`) or as RGB three-tuples 
 (`[255 255 255]`).
+  
+### Grids
 
-### Grid Format & Cell Merging
+Both `tree-grid` and `table-grid` create `[[cell]]` data structures with 
+default styling and positioning for the cells. 
 
-The functions `table` and `tree` convert the source data into the grid format
-which can go directly into the workbook map. The grid is `[[cell]]`, where each
-`[cell]` represents a row.
+You can use the `transpose` and `juxtapose` helpers along with the `cell` 
+namespace to manipulate grids more manually.
 
-The cell data are either plain values (String, Date, Number, etc.) or a map 
-that includes optional style data / cell merging instructions.
+For example, a multiplication table with all of the squares highlighted:
 
 ```clojure
-(let [title-style {:font {:bold true :font-height-in-points 10} :alignment :center}]
-  (excel/quick-open 
-    {"Some Grid" 
-     [ [{:value "This is a Title" :width 5 :style title-style}] ;; Title row
-       ["This" "Is" "A" "Row"] ;; Another row
-      ]}))
+(let [highlight {:fill-pattern :solid-foreground
+                 :fill-foreground-color :yellow}
+
+      grid (for [x (range 1 11)]
+             (for [y (range 1 11)]
+               (cond-> (* x y) (= x y) (cell/style highlight))))
+
+      cols (map #(cell/style % {:font {:bold true}}) (range 1 11))
+      ;; Add the top column labels
+      grid (concat [cols] grid)
+      ;; Add the left-hand column labels
+      grid (excel/juxtapose (excel/transpose [(cons nil cols)]) grid)]
+  (excel/quick-open!
+    {"Transpose & Juxtapose"
+     (excel/with-title "Multiplication Table" grid)}))
 ```
 
-![A spreadsheet with a merged title](resources/manual-grid.png)
+![A multiplication table](resources/mult-table.png)
 
-## v2.0.0 Roadmap
-- A higher-level interface that allows wrapping side-effecting code in a `view`
-  or a `write` macro to redirect any `clojure.pprint/print-table` effects into
-  a spreadsheet.
-  - Likewise, an improved `pprint` for trees that works under the same abstraction.
-  - Sheet names can be specified via meta data.
-- Performance improvements. Right now, performance starts to break down after 
-  about 100,000 rows on my Ubuntu / OpenOffice setup, and much sooner on Mac.
-  - Rework the lower-level interface to take full advantage of laziness, where 
-    possible.
-  - Rethink the way formatting is handled.
-  - Check if it ends up being more performant to write a chunk of the file, and
-    then re-open it to write the next chunk. This will have to do with Apache 
-    POIs way of dealing with memory, so I'll have to investigate that first.
-- Templates which provide an easy way to work with formulas and styling. The 
-  planned functionality is simple: instead of overwriting a document, allow
-  overwriting a single sheet within the document.
-  - Then to create a template, you just make a .xlsx file, or download
-    [some cool Google Sheets template](https://docs.google.com/spreadsheets/u/0/?usp=mkt_sheets_tpl),
-    with multiple sheets.
-  - Some of the sheets are _only_ source data, which we'll write to programatically,
-    and other sheets depend on those source sheets (via formulas, macros, etc.).
-- Tentatively: a Java wrapper or some RPC interface for other languages to use 
-  the functionality of this library, maybe by passing in JSON tables / trees? 
-  Though "start-writing" and "stop-wrting" commands with lines of data in between 
-  might be more practical.
+### Templates
+
+The support for templates is not feature packed, but it works well in situations 
+where your template can use formulas to read data from another sheet.
+
+The `append!` function allows merging in a sheet to a workbook, replacing any 
+other sheet of the same name. So, if your template is a workbook with a main 
+sheet that reads from another data sheet, you can fill in the template by 
+replacing the data sheet.
+
+For example, you can try:
+```clojure
+(def example-template-data
+  ;; Some mocked tabular uptime data to inject into the template
+  (let [start-ts (inst-ms #inst"2020-05-01")
+        one-hour (* 1000 60 60)]
+    (for [i (range 99)]
+      {"Date"                 (java.util.Date. (+ start-ts (* i one-hour)))
+       "Webserver Uptime"     (- 1.0 (rand 0.25))
+       "REST API Uptime"      (- 1.0 (rand 0.25))
+       "WebSocket API Uptime" (- 1.0 (rand 0.25))})))
+
+
+; The template here has a 'raw' sheet, which contains uptime data for 3 time
+; series, and a 'Summary' sheet, wich uses formulas + the raw data to compute
+; and plot. We're going to overwrite the 'raw' sheet to fill in the template.
+(let [template (clojure.java.io/resource "uptime-template.xlsx")
+      new-data {"raw" (excel/table-grid example-template-data)}]
+  (excel/append! new-data template "filled-in-template.xlsx"))
+```
+
+## Roadmap
+
+- A way to read in a saved workbook to the `{sheet-name [[cell]]}` format. I'm 
+  not sure what the best way to extract style data is, since there are so many
+  possible values.
+

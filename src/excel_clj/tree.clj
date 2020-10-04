@@ -1,384 +1,280 @@
 (ns excel-clj.tree
-  "A key-value tree for Excel (accounting) data. The format is
-  [Label [Children]] for nodes and [Label {:column :value}] for leaves.
+  "Trees are maps, leaves are maps of something->(not a map).
 
-  For some example code, check out the various (comment ...) blocks in this
-  namespace."
+  Use ordered maps (like array-map) to enforce order."
   {:author "Matthew Downey"}
-  (:require [clojure.string :as string]
-            [clojure.walk :as cwalk]))
+  (:require [clojure.walk :as walk])
+  (:import (clojure.lang Named)))
 
-;;; Utilities for vector math
 
-(defn sum-maps
-  "Similar to (merge-with + ...) but treats nil keys as 0 values."
-  ([m1 m2] ;; nil == 0
-   (let [all-keys (into #{} (concat (keys m1) (keys m2)))]
-     (into {} (map (fn [k] [k (+ (or (m1 k) 0) (or (m2 k) 0))])) all-keys)))
-  ([m1 m2 & ms]
-   (reduce sum-maps {} (into [m1 m2] ms))))
+(defn leaf?
+  "A leaf is any map whose values are not maps."
+  [x]
+  (and (map? x) (every? (complement map?) (vals x))))
 
-(defn negate-map
-  [m]
-  (into {} (map (fn [[k v]] [k (* -1 (or v 0))])) m))
 
-(defn subtract-maps
-  "Very important difference from (merge-with - ...):
+(defn fold-kvs
+  "Fold the `tree` leaves together into one combined leaf calling
+  `(f k (get leaf-1 k) (get leaf-2 k))`.
 
-    (merge-with - {:foo 10} {:foo 5 :bar 5})
-    ; => {:foo 5, :bar 5}
+  The function `f` is called for the _union_ of all keys for both leaves,
+  so one of the values may be `nil`."
+  [f tree]
+  (->> tree
+       (tree-seq (complement leaf?) vals)
+       (filter leaf?)
+       (reduce
+         (fn [combined leaf]
+           (let [all-keys (into (set (keys combined)) (keys leaf))]
+             (reduce
+               (fn [x k] (update x k #(f k % (get leaf k))))
+               combined
+               all-keys))))))
 
-    (subtract-maps {:foo 10} {:foo 5 :bar 5})
-    ; => {:foo 5, :bar -5}
-  "
-  ([m1 m2]
-   (sum-maps m1 (negate-map m2)))
-  ([m1 m2 & ms]
-   (reduce subtract-maps {} (into [m1 m2] ms))))
 
-;;; Basic tree API
+(defn fold
+  "Fold the `tree` leaves together into one combined leaf calling
+  `(f (get leaf-1 k nil-value) (get leaf-2 k nil-value))`.
 
-(def leaf?
-  "Is the node a leaf?"
-  (comp map? second))
+  E.g. `(fold + tree)` would sum all of the `{label number}` leaves in tree,
+  equivalent to `(apply merge-with + all-leaves)`.
 
-(def label
-  "The label for a node."
-  first)
-
-(defn children
-  "The node's children, or [] in the case of a leaf."
-  [node]
-  (if (leaf? node)
-    []
-    (second node)))
-
-(defn value
-  "Aggregate all of the leaf maps in `tree` by reducing over them with
-  `reducing-fn` (defaults to summing maps together). If given a single
-  map, returns the map."
-  ([tree]
-   (value tree sum-maps))
-  ([tree reducing-fn]
-   (cond
-     (map? tree) tree
-     (leaf? tree) (second tree)
-     :else
-     (transduce
-       (comp (filter leaf?) (map second))
-       (completing reducing-fn)
-       {}
-       (tree-seq (complement leaf?) children tree)))))
-
-(defmacro math
-  "Any calls to + or - within form are modified to work on trees and tree
-  values (maps of numbers)."
-  [form]
-  (cwalk/postwalk
-    (fn [form]
-      (if (and (sequential? form) (#{'+ '-} (first form)))
-        (let [replace-with ({'+ `sum-maps '- `subtract-maps} (first form))]
-          (cons replace-with (map (fn [tree-expr] (list `value tree-expr)) (rest form))))
-        form))
-    form))
-
-;;; Utilities for constructing & walking / modifying trees
-
-(defn walk
-  "Map f across all [label attrs] and [label [child]] nodes, depth-first.
-
-  Use with the same `branch?` and `children` functions that you'd give to
-  `tree-seq` in order to build a tree of the format used by this namespace."
+  However, `(fold - tree)` is not `(apply merge-with - all-leaves)`. They
+  differ because `merge-with` only uses its function in case of collision;
+  `(merge-with - {:x 1} {:y 1})` is `{:x 1, :y 1}`. The result with `fold`
+  would be `{:x 1, :y -1}`."
   ([f tree]
-   (walk f (complement leaf?) children tree))
-  ([f branch? children root]
-   (let [walk (fn walk [node]
-                (if (branch? node)
-                  (f node (mapv walk (children node)))
-                  (f node [])))]
-     (walk root))))
+   (fold f 0 tree))
+  ([f nil-value tree]
+   (fold-kvs (fn [k x y] (f (or x nil-value) (or y nil-value))) tree)))
+
 
 (comment
-  "For example, create a file tree with nodes listing the :size of each file."
-  (walk
-    (fn [f xs]
-      (if-not (seq xs)
-        [(.getName f) {:size (.length f)}]
-        [(.getName f) xs]))
-    #(.isDirectory %) #(.listFiles %) (clojure.java.io/file ".")))
+  (fold + {:bitstamp {:btc 1 :xrp 35000}
+           :bitmex {:margin {:btc 2}
+                    :short-xrp {:btc 1 :xrp -35000}}})
+  ;=> {:btc 4, :xrp 0}
 
-(defn negate-tree
-  "Negate all of the numbers in a tree."
+  (fold - {:capital {:btc 1} :debt {:btc 1 :mxn 1}})
+  ;=> {:btc 0, :mxn -1}
+  )
+
+
+(defn tree
+  "Build a tree from the same arguments you would use for `tree-seq`, plus
+  `k` and `v` functions for node keys and leaf value maps, respectively."
+  [branch? children root k v]
+  (let [build (fn build [node]
+                (if-let [children (when (branch? node)
+                                    (seq (children node)))]
+                  {(k node) (apply merge (map build children))}
+                  {(k node) (v node)}))]
+    (build root)))
+
+
+(comment
+  "E.g. to build a file tree..."
+  (let [dir? #(.isDirectory %)
+        listfs #(.listFiles %)
+        name #(.getName %)
+        size (fn [f] {:size (.length f)})]
+    (tree dir? listfs (clojure.java.io/file ".") name size))
+
+  "...and then get the total size"
+  (fold + *1)
+  ;=> {:size 19096768}
+  )
+
+
+(defn negate
+  "Invert the sign of every leaf number for a `tree` with leaves of x->number."
   [tree]
-  (walk
-    (fn [node children]
-      (if-not (seq children)
-        [(label node) (negate-map (value node))]
-        [(label node) children]))
+  (walk/postwalk
+    (fn [x]
+      (if (leaf? x)
+        (zipmap (keys x) (map - (vals x)))
+        x))
     tree))
 
-(defn shallow
-  "'Shallow' the tree one level by getting rid of the root and combining its
-  children. Doesn't modify a leaf."
-  [tree]
-  (if-not (leaf? tree)
-    (let [merged-label (string/join " & " (map label (children tree)))
-          merged-children (mapcat
-                            (fn [node]
-                              (if (leaf? node) [node] (children node)))
-                            (children tree))]
-      [merged-label (vec merged-children)])
-    tree))
 
-(defn merge-trees
-  "Merge the children of the provided trees under a single root."
-  [root-label & trees]
-  (assoc (shallow ["Merged" trees]) 0 root-label))
+(def ^{:private true :dynamic true} *depth* nil)
+(defn- ->str [x] (if (instance? Named x) (name x) (str x)))
+(defn table
+  "Given `(fn f [parent-key node depth] => row-map)`, convert `tree` into a
+  table of `[row]`.
 
-;;; Coerce a tree format to a tabular format
+  If no `f` is provided, the default implementation creates a pivot table with
+  no aggregation of groups and a :tree/indent in each row corresponding to the
+  depth of the node.
 
-(defn accounting-table
-  "Render a coll of trees into a coll of tabular maps, where leaf values are
-  listed on the same line and aggregated below into a total (default aggregation
-  is addition).
+  Pass `(combined-header)` or `(combined-footer)` as `f` to aggregate sub-trees
+  according to custom logic (summing by default)."
+  ([tree]
+   (table
+     (fn render [parent node depth]
+       (let [row (fold (fn [_ _] nil) node)]
+         (cons
+           (assoc row "" (->str parent) :tree/indent depth)
+           (when-not (leaf? node) (table render node)))))
+     tree))
+  ([f tree]
+   (into [] (mapcat (fn [[k t]] (table f k t))) tree))
+  ([f k tree]
+   (binding [*depth* (inc (or *depth* -1))]
+     (f k tree *depth*))))
 
-  Each item in the coll is a map with ::depth, ::label, ::header?, and ::total?
-  attributes, in addition to the attributes in the leaves.
 
-  If an `:aggregate-with` function is provided, total lines are constructed by
-  reducing that function over sub-leaves. Defaults to a reducing with `sum-maps`."
-  [trees & {:keys [aggregate-with min-leaf-depth] :or {aggregate-with sum-maps
-                                                       min-leaf-depth 2}}]
-  (->>
-    trees
-    (mapcat
-      (fn [tree]
-        (walk
-          (fn [node children]
-            (if-let [children (seq (flatten children))]
-              (concat
-                ;; First we show the header
-                [{::depth 0 ::label (label node) ::header? true}]
-                ;; Then the children & their values
-                (mapv #(update % ::depth inc) children)
+(defn combined-header
+  "To build a table where each branch node is a row with values equal to its
+  combined leaves."
+  ([] (combined-header (partial fold +)))
+  ([combine-with]
+   (fn render [parent node depth]
+     (cons
+       (assoc
+         (combine-with node)
+         "" (->str parent)
+         :tree/indent depth)
+       (when-not (leaf? node) (table render node))))))
 
-                ;; And finally an aggregation if there are multiple header children
-                ;; or any leaf children
-                (let [fchild (first children)
-                      siblings (get (group-by :depth children) (:depth fchild))]
-                  (when (or (>= (count siblings) 2) (not (::header? fchild)))
-                    [(merge {::depth 0 ::label "" ::total? true} (value node aggregate-with))])))
 
-              ;; A leaf just has its label & value attrs. The depth is inc'd by each
-              ;; parent back to the root, so it does not stay at 0.
-              [(merge {::depth 0 ::label (label node)} (value node aggregate-with))]))
-          tree)))
-    (map
-      (fn [table-row]
-        ;; not a leaf
-        (if (or (::header? table-row) (::total? table-row) (not (::depth table-row)))
-          table-row
-          (update table-row ::depth max min-leaf-depth))))))
+(defn combined-footer
+  "To build a table where each branch node is followed by its children and then
+  a blank-labeled total row at the same :tree/indent as the header with a value
+  equal to its combined leaves."
+  ([] (combined-footer (partial fold +)))
+  ([combine-with]
+   (fn render [parent node depth]
+     (if-not (leaf? node)
+       (let [combined (combine-with node)
+             empty-row (zipmap (keys combined) (repeat nil))]
+         (concat
+           [(assoc empty-row "" (->str parent) :tree/indent depth)] ; header
+           (table render node) ; children
+           [(assoc combined "" "" :tree/indent depth)])) ; total
+       [(assoc node "" (->str parent) :tree/indent depth)]))))
 
-(defn unaggregated-table
-  "Similar to account-table, but makes no attempt to aggregate non-leaf headers,
-  and accepts a coll of trees."
-  [trees]
-  (mapcat
-    (fn [tree]
-      (walk
-        (fn [node children]
-          (if-let [children (seq (flatten children))]
-            (into [{::depth 0 ::label (label node) ::header? true}] (map #(update % ::depth inc)) children)
-            (merge {::depth 0 ::label (label node)} (value node))))
-        tree))
-    trees))
 
-(defn render
-  "Given a coll of table items with a qualified ::depth and ::label keys, return
-  a table items indenting labels with ::depth and keeping other keys as column
-  labels, removing namespace qualified keywords.
+(defn indent
+  "Increase the :tree/indent of each table row by `n` (default 1)."
+  ([table-rows] (indent table-rows 1))
+  ([table-rows n] (map #(update % :tree/indent (fnil + 0) n) table-rows)))
 
-  (Used for printing in a string, rather than with Excel.)"
-  [table-items & {:keys [indent-width] :or {indent-width 2}}]
-  (let [indent-str (apply str (repeat indent-width " "))]
-    (letfn [(fmt [line-item]
-              (-> line-item
-                  (dissoc ::depth ::label ::total? ::header?)
-                  (assoc "" (str (apply str (repeat (::depth line-item) indent-str))
-                                 (::label line-item)))))]
-      (map fmt table-items))))
+
+(defn with-table-header
+  "Prepend a table header with the given label & indent the following rows."
+  [label table-rows]
+  (let [[x & xs :as indented] (indent table-rows)
+        nil-values (fn [m] (zipmap (keys m) (repeat nil)))]
+    (cons
+      (-> x
+          (dissoc :tree/indent)
+          nil-values
+          (assoc "" label :tree/indent (dec (:tree/indent x))))
+      indented)))
+
+
+(defn- table-cell [k row width]
+  (format (str "%-" width "s") (or (get row k) "-")))
+
+
+(defn- table-column-widths [ks rows indent-with]
+  (let [indent (count indent-with)]
+    (reduce
+      (fn [k->width row]
+        (let [indent-width (fn [k]
+                             (if (= k (first ks))
+                               (* (get row :tree/indent 0) indent)
+                               0))
+              k->rwidth (map
+                          #(+ (count (table-cell % row 1)) (indent-width %))
+                          (keys k->width))]
+          (zipmap
+            (keys k->width)
+            (map max (vals k->width) k->rwidth))))
+      (zipmap ks (map (comp count pr-str) ks))
+      rows)))
+
 
 (defn print-table
-  "Display tabular data in a way that preserves label indentation in a way the
-  clojure.pprint/print-table does not."
-  ([xs]
-   (print-table xs {}))
-  ([xs {:keys [ks empty-str pad-width]}]
-   (let [ks (or ks (sequence (comp (mapcat keys) (distinct)) xs))
-         empty-str (or empty-str "-")
-         pad-width (or pad-width 2)]
-     (let [len (fn [k]
-                 (let [len' #(or (some-> (% k) str count) 0)]
-                   (+ pad-width (transduce (map len') (completing max) 0 (conj xs {k k})))))
-           header (into {} (map (juxt identity identity)) ks)
-           ks' (mapv (juxt identity len) ks)]
-       (doseq [x (cons header xs)]
-         (doseq [[k l] ks']
-           (print (format (str "%-" l "s") (get x k empty-str))))
-         (println ""))))))
+  "Pretty print a tree with the same signature as `clojure.pprint/print-table`,
+  indenting rows according to a :tree/indent attribute.
 
-(defn headers
-  "Return a vector of headers in the tree, with any headers given in first-hs
-  at the beginning and and in last-hs in order."
-  [tree first-hs last-hs]
-  (let [all-specified (into first-hs last-hs)
-        all-headers (set (keys (value tree)))
-        other-headers (apply disj all-headers all-specified)]
-    (vec (filter all-headers (concat first-hs other-headers last-hs)))))
+  E.g. (print-table (table tree))"
+  ([rows]
+   (let [ks (-> (keys (first rows))
+                (set)
+                (disj "" :tree/indent))
+         labeled? (contains? (set (keys (first rows))) "")]
+     (print-table (into (if labeled? [""] []) ks) rows)))
+  ([ks rows]
+   (let [indent "  "
+         k->max (table-column-widths ks rows indent)]
+     (doseq [row (cons (zipmap ks ks) rows)
+             :let [n-indents (get row :tree/indent 0)]]
+       (dotimes [_ n-indents] (print indent))
+       (doseq [k ks
+               :let [width (get k->max k)
+                     indent (if (= k (first ks))
+                              (* n-indents (count indent))
+                              0)]]
+         (print (table-cell k row (- width indent)) " "))
+       (println)))))
+
+
+;;; For example
+
 
 (def mock-balance-sheet
-  (vector
-    ["Assets"
-     [["Current Assets"
-       [["Cash" {2018 100M, 2017 85M}]
-        ["Accounts Receivable" {2018 5M, 2017 45M}]]]
-      ["Investments" {2018 100M, 2017 10M}]
-      ["Other" {2018 12M, 2017 8M}]]]
-    ["Liabilities & Stockholders' Equity"
-     [["Liabilities"
-       [["Current Liabilities"
-         [["Notes payable" {2018 5M, 2017 8M}]
-          ["Accounts payable" {2018 10M, 2017 10M}]]]
-        ["Long-term liabilities" {2018 100M, 2017 50M}]]]
-      ["Equity"
-       [["Common Stock" {2018 102M, 2017 80M}]]]]]))
+  {"Assets"
+   {"Current Assets" {"Cash"                {2018 100M, 2017 85M}
+                      "Accounts Receivable" {2018 5M, 2017 45M}}
+    "Investments"    {2018 100M, 2017 10M}
+    "Other"          {2018 12M, 2017 8M}}
+
+   "Liabilities & Stockholders' Equity"
+   {"Liabilities" {"Current Liabilities"
+                    {"Notes payable"    {2018 5M, 2017 8M}
+                     "Accounts payable" {2018 10M, 2017 10M}}
+                   "Long-term liabilities" {2018 100M, 2017 50M}}
+    "Equity"      {"Common Stock" {2018 102M, 2017 80M}}}})
+
 
 (comment
-  ;; Render the tree as a table
-  (-> mock-balance-sheet accounting-table render print-table)
 
-  ;; Do addition or subtraction with trees using the tree-math macro
-  (let [[assets [_ [liabilities equity]]] mock-balance-sheet]
-    (println "Assets - Liabilities =" (math (- assets liabilities)))
-    (println "Equity =" (value equity))
-    (println)
-    (println "Equity + Liabilities =" (math (+ equity liabilities)))
-    (println "Assets =" (value assets))))
-; =>
-;                                     2018 2017
-; Assets                              -    -
-;   Current Assets                    -    -
-;     Cash                            100  85
-;     Accounts Receivable             5    45
-;                                     105  130
-;   Investments                       100  10
-;   Other                             12   8
-;                                     217  148
-; Liabilities & Stockholders' Equity  -    -
-;   Liabilities                       -    -
-;     Current Liabilities             -    -
-;       Notes payable                 5    8
-;       Accounts payable              10   10
-;                                     15   18
-;     Long-term liabilities           100  50
-;                                     115  68
-;   Equity                            -    -
-;     Common Stock                    102  80
-;                                     102  80
-;                                     217  148
-;
-; Assets - Liabilities = {2018 102M, 2017 80M}
-; Equity = {2018 102M, 2017 80M}
-;
-; Equity + Liabilities = {2018 217M, 2017 148M}
-; Assets = {2018 217M, 2017 148M}
+  ;; Render as tables
+  (print-table (table mock-balance-sheet))
+  (print-table (table (combined-footer) mock-balance-sheet))
+  (print-table (table (combined-header) mock-balance-sheet))
 
-(comment
-  ;; Or you can visualize with ztellman/rhizome
-  ;; Keep in mind that this requires $ apt-get install graphviz
-  (use '(rhizome viz))
-  (rhizome.viz/view-tree
-    (complement leaf?) children (second mock-balance-sheet)
-    :edge->descriptor (fn [x y] (when (leaf? y) {:label (label y)}))
-    :node->descriptor #(->{:label (if (leaf? %) (value %) [(label %) (value %)])})))
+  ;; Do some math to subtract liabilities from assets
+  (def assets (get mock-balance-sheet "Assets"))
 
-;;; Coerce a tabular format to a tree format
+  (def liabilities
+    (get-in
+      mock-balance-sheet
+      ["Liabilities & Stockholders' Equity" "Liabilities"]))
 
-(defn ordered-group-by
-  "Like `group-by`, but returns a [k [v]] seq and doesn't rearrange values except
-  to include them in a group. Probably less performant because it has to search
-  the built up seq to find the proper key-value store."
-  [f xs]
-  (letfn [(update-or-add [xs pred update default]
-            (loop [xs' [], xs xs]
-              (if-let [x (first xs)]
-                (if (pred x)
-                  (into xs' (cons (update x) (rest xs)))
-                  (recur (conj xs' x) (rest xs)))
-                (conj xs' default))))
-          (assign-to-group [groups x]
-            (let [group (f x)]
-              (update-or-add
-                groups
-                #(= (first %) group)
-                #(update % 1 conj x)
-                [group [x]])))]
-    (reduce assign-to-group [] xs)))
+  (fold + assets)
+  ;=> {2018 217M, 2017 148M}
 
-(defn table->trees
-  "Collapse a tabular collection of maps into a collection of trees, where the
-  label at each level of the tree is given by each of `node-fns` and the columns
-  displayed are the result of `format-leaf`, which returns a tabular map.
+  (fold + liabilities)
+  ;=> {2018 115M, 2017 68M}
 
-  See the (comment ...) block under this method declaration for an example."
-  [tabular format-leaf & node-fns]
-  (letfn [(inner-build
-            ([root items]
-             (vector
-               root
-               (if (= (count items) 1)
-                 (format-leaf (first items))
-                 (map #(->["" (format-leaf %)]) items))))
-            ([root items below-root & subsequent]
-             (vector
-               root
-               (->> (ordered-group-by below-root items)
-                    (mapv (fn [[next-root next-items]]
-                            (apply inner-build next-root next-items subsequent)))))))]
-    (second (apply inner-build "" tabular node-fns))))
+  ; this should give us the equity amount
+  (fold - {:assets (fold + assets) :liabilities (fold + liabilities)})
+  ;=> {2018 102M, 2017 80M}
 
-(comment
-  (-> (table->trees
-        ;; The table we'll convert to a tree
-        [{:from "MXN" :to "AUD" :on "BrokerA" :return (rand)}
-         {:from "MXN" :to "USD" :on "BrokerB" :return (rand)}
-         {:from "MXN" :to "JPY" :on "BrokerB" :return (rand)}
-         {:from "USD" :to "AUD" :on "BrokerA" :return (rand)}]
+  ;; Print a more complex table illustrating that math
+  (def tbl
+    (let [blank-line [{"" ""}]]
+      (concat
+        (with-table-header "Assets" (table assets))
+        blank-line
+        (with-table-header "Liabilities" (table liabilities))
+        blank-line
+        (table {"Assets Less Liabilities"
+                (fold - {:assets (fold + assets)
+                         :liabilities (fold + liabilities)})}))))
 
-        ;; The data fields we want to look at
-        #(-> {"Return"            (format "%.2f%%" (:return %))
-              "Trade Description" (format "%s -> %s" (:from %) (:to %))})
-
-        ;; The top level label -- split by above/below 50% return
-        #(if (> (:return %) 0.5) "High Return" "Some Return")
-
-        ;; Then split by which currency we start with
-        #(str "Trading " (:from %))
-
-        ;; Finally, by broker
-        :on)
-      (unaggregated-table)
-      (render :indent-width 5)
-      (print-table {:empty-str "" :pad-width 5})))
-
-; =>                       Return     Trade Description
-;       High Return
-;       Trading MXN
-;              BrokerA     0.70%      MXN -> AUD
-;              BrokerB
-;                          0.68%      MXN -> USD
-;                          0.93%      MXN -> JPY
-;     Some Return
-;         Trading USD
-;              BrokerA     0.20%      USD -> AUD"
+  (print-table tbl))
