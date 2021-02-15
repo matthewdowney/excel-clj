@@ -12,8 +12,9 @@
             [taoensso.encore :as enc]
             [taoensso.tufte :as tufte])
   (:import (java.io Closeable BufferedInputStream InputStream)
-           (org.apache.poi.ss.usermodel RichTextString Sheet Cell Row Workbook)
+           (org.apache.poi.ss.usermodel RichTextString Sheet Cell Row Workbook DateUtil)
            (java.util Date Calendar)
+           (java.time LocalDate LocalDateTime)
            (org.apache.poi.ss.util CellRangeAddress)
            (org.apache.poi.xssf.streaming SXSSFWorkbook)
            (org.apache.poi.xssf.usermodel XSSFWorkbook)))
@@ -91,7 +92,7 @@
   [^Cell cell data]
   ;; These types are allowed natively
   (if-type
-    [data [Boolean Calendar String Date Double RichTextString]]
+    [data [Boolean Calendar String Date LocalDate LocalDateTime Double RichTextString]]
     (doto cell (.setCellValue data))
 
     ;; Apache POI requires that numbers be doubles
@@ -309,10 +310,12 @@
                 ; the template sheet to overwrite completely
                 sh (sheet-writer w "raw")]
 
-      (doseq [header ["Date" ; use the same headers as in the template
+      (doseq [header ["Date"
                       "Webserver Uptime"
                       "REST API Uptime"
-                      "WebSocket API Uptime"]]
+                      "WebSocket API Uptime"
+                      "Local Datetime"
+                      "Local Date"]]
         (write! sh header))
 
       (newline! sh)
@@ -322,13 +325,18 @@
             one-hour (* 1000 60 60)]
         (dotimes [i 99]
           (let [row-ts (+ start-ts (* i one-hour))
-                ymd {:data-format :ymd :alignment :left}]
-            (write! sh (Date. ^long row-ts) ymd 1 1))
+                ymd {:data-format :ymd :alignment :left}
+                dt {:data-format :datetime :alignment :left}]
+            (write! sh (Date. ^long row-ts) ymd 1 1)
 
-          ; random uptime values
-          (write! sh (- 1.0 (rand 0.25)))
-          (write! sh (- 1.0 (rand 0.25)))
-          (write! sh (- 1.0 (rand 0.25)))
+            ; random uptime values
+            (write! sh (- 1.0 (rand 0.25)))
+            (write! sh (- 1.0 (rand 0.25)))
+            (write! sh (- 1.0 (rand 0.25)))
+
+            ; LocalDate / LocalDateTime value
+            (write! sh (DateUtil/toLocalDateTime (Date. ^long row-ts)) dt 1 1)
+            (write! sh (.toLocalDate (DateUtil/toLocalDateTime (Date. ^long row-ts))) ymd 1 1))
           (newline! sh))))))
 
 

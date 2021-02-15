@@ -5,5 +5,5 @@
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clojure/clojure "1.10.1"]
                  [com.taoensso/tufte "2.0.1"]
-                 [org.apache.poi/poi-ooxml "4.0.0"]
+                 [org.apache.poi/poi-ooxml "4.1.2"]
                  [org.jodconverter/jodconverter-core "4.0.0-RELEASE"]])

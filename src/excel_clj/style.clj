@@ -191,6 +191,7 @@
   {:accounting "_($* #,##0.00_);_($* (#,##0.00);_($* \"-\"??_);_(@_)"
    :number "#.###############"
    :ymd "yyyy-MM-dd"
+   :datetime "yyyy-MM-dd hh:mm:ss"
    :percent "0.00%"})
 
 
