@@ -113,7 +113,7 @@ contains final result of those calculations.
 
 ### PDF Generation
 
-If you're on a system that uses an OpenOffice implementation of Excel, PDF 
+If you're on a system that uses a LibreOffice or Apache OpenOffice implementation of Excel, PDF 
 generation works the same was as creating a spreadsheet:
 
 ```clojure
@@ -250,4 +250,3 @@ For example, you can try:
 - A way to read in a saved workbook to the `{sheet-name [[cell]]}` format. I'm 
   not sure what the best way to extract style data is, since there are so many
   possible values.
-
