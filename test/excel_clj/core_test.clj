@@ -57,16 +57,3 @@
           (append! new-data template temp-file)))
       (finally
         (io/delete-file temp-file)))))
-
-
-(deftest convert-pdy-test
-  (let [temp-file (io/file (temp ".xlsx"))]
-    (try
-      (testing "Example code snippet writes successfully."
-        (println "Writing example template...")
-        (let [template (clojure.java.io/resource "uptime-template.xlsx")
-              new-data {"raw" (table-grid example-template-data)}]
-          (append! new-data template temp-file)))
-      (finally
-        (io/delete-file temp-file)))))
-
