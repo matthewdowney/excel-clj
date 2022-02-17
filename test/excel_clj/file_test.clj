@@ -3,7 +3,7 @@
             [excel-clj.file :as file]
             [clojure.java.io :as io]))
 
-(deftest convert-to-pdf-test
+(deftest ^:office-integrations convert-to-pdf-test
   (let [input-file (clojure.java.io/resource "uptime-template.xlsx")
         temp-pdf-file (io/file (file/temp ".pdf"))]
     (try

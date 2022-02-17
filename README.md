@@ -23,6 +23,10 @@ Lein:
     - [Grids](#grids)
     - [Templates](#templates)
 - [Roadmap](#roadmap)
+- [Development](#development)
+    - [Unit Tests](#unit-tests)
+    - [Office Integration Tests](#office-integration-tests)
+    - [All Tests](#all-tests)
 
 ## Getting Started
 
@@ -250,3 +254,26 @@ For example, you can try:
 - A way to read in a saved workbook to the `{sheet-name [[cell]]}` format. I'm 
   not sure what the best way to extract style data is, since there are so many
   possible values.
+
+## Development
+
+### Unit Tests
+
+Standard unit tests can be run with the following command:
+
+`$ lein test`
+
+### Office Integration Tests
+
+This test selector is designed to run tests that are dependent on the presence of LibreOffice or OpenOffice. 
+
+These tests can be run with:
+
+`$ lein test :office-integrations`
+
+### All Tests
+
+Run all tests with the following command:
+
+`$ lein test :all`
+ 

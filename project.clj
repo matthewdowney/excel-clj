@@ -9,4 +9,6 @@
                  [org.apache.poi/poi-ooxml "5.2.0"]
                  [org.jodconverter/jodconverter-local "4.4.2"]]
   :profiles {:test {:dependencies [[org.apache.logging.log4j/log4j-core "2.17.1"]
-                                   [org.slf4j/slf4j-nop "1.7.36"]]}})
+                                   [org.slf4j/slf4j-nop "1.7.36"]]}}
+  :test-selectors {:default             (complement :office-integrations)
+                   :office-integrations :office-integrations})
