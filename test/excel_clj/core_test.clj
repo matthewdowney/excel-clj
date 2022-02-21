@@ -54,6 +54,6 @@
         (println "Writing example template...")
         (let [template (clojure.java.io/resource "uptime-template.xlsx")
               new-data {"raw" (table-grid example-template-data)}]
-          (append! new-data template "filled-in-template.xlsx")))
+          (append! new-data template temp-file)))
       (finally
         (io/delete-file temp-file)))))

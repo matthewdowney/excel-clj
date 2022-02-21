@@ -15,8 +15,8 @@
   (:import (org.apache.poi.xssf.streaming SXSSFSheet)
            (org.apache.poi.ss.usermodel Sheet)
            (java.io File)
-           (org.jodconverter.office DefaultOfficeManagerBuilder)
-           (org.jodconverter OfficeDocumentConverter)
+           (org.jodconverter.local.office LocalOfficeManager)
+           (org.jodconverter.local LocalConverter)
            (java.awt Desktop HeadlessException)))
 
 
@@ -140,16 +140,20 @@
   "Convert the `from-document`, either a File or a path to any office document,
   to pdf format and write the pdf to the given pdf-path.
 
-  Requires OpenOffice. See https://github.com/sbraconnier/jodconverter.
+  Requires LibreOffice or Apache OpenOffice https://github.com/sbraconnier/jodconverter
 
   Returns a File pointing at the PDF."
   [from-document pdf-path]
   (let [path (force-extension pdf-path "pdf")
-        office-manager (.build (DefaultOfficeManagerBuilder.))]
+        office-manager (-> (LocalOfficeManager/builder)
+                           (.build))]
     (.start office-manager)
     (try
-      (let [document-converter (OfficeDocumentConverter. office-manager)]
-        (.convert document-converter (io/file from-document) (io/file path)))
+      (let [document-converter (LocalConverter/make office-manager)]
+        (-> document-converter
+            (.convert (io/file from-document))
+            (.to (io/file path))
+            (.execute)))
       (finally
         (.stop office-manager)))
     (io/file path)))
@@ -181,37 +185,38 @@
   (open (write-pdf! workbook (temp ".pdf"))))
 
 
-(defn example
-  "Write & open a sheet composed of a simple grid."
-  []
-  (let [grid [["A" "B" "C"]
-              [1 2 3]]]
-    (quick-open! {"Sheet 1" grid})))
+(comment
+  (defn example
+    "Write & open a sheet composed of a simple grid."
+    []
+    (let [grid [["A" "B" "C"]
+                [1 2 3]]]
+      (quick-open! {"Sheet 1" grid})))
 
 
-(defn example-plus
-  "Write & open a sheet composed of a more involved grid."
-  []
-  (let [t (java.util.Calendar/getInstance)
-        grid [["String" "Abc"]
-              ["Numbers" 100M 1.234 1234 12345N]
-              ["Date (not styled, styled)" t (style t {:data-format :ymd})]]
+  (defn example-plus
+    "Write & open a sheet composed of a more involved grid."
+    []
+    (let [t (java.util.Calendar/getInstance)
+          grid [["String" "Abc"]
+                ["Numbers" 100M 1.234 1234 12345N]
+                ["Date (not styled, styled)" t (style t {:data-format :ymd})]]
 
-        header-style {:border-bottom :thin :font {:bold true}}
-        header-rows [[(-> "Type"
-                          (style header-style)
-                          (dims {:height 2})
-                          (style {:vertical-alignment :center}))
-                      (-> "Examples"
-                          (style header-style)
-                          (dims {:width 4})
-                          (style {:alignment :center :border-bottom :none}))]
-                     (mapv #(style % {:font {:italic true}
-                                      :alignment :center
-                                      :border-bottom :thin})
-                           [nil 1 2 3 4])]
-        excel-file (quick-open! {"Sheet 1" (concat header-rows grid)})]
-    (try
-      (open (convert-pdf! excel-file (temp ".pdf")))
-      (catch Exception e
-        (println "(Couldn't open a PDF on this platform.)")))))
+          header-style {:border-bottom :thin :font {:bold true}}
+          header-rows [[(-> "Type"
+                            (style header-style)
+                            (dims {:height 2})
+                            (style {:vertical-alignment :center}))
+                        (-> "Examples"
+                            (style header-style)
+                            (dims {:width 4})
+                            (style {:alignment :center :border-bottom :none}))]
+                       (mapv #(style % {:font          {:italic true}
+                                        :alignment     :center
+                                        :border-bottom :thin})
+                             [nil 1 2 3 4])]
+          excel-file (quick-open! {"Sheet 1" (concat header-rows grid)})]
+      (try
+        (open (convert-pdf! excel-file (temp ".pdf")))
+        (catch Exception e
+          (println "(Couldn't open a PDF on this platform.)"))))))

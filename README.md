@@ -23,6 +23,10 @@ Lein:
     - [Grids](#grids)
     - [Templates](#templates)
 - [Roadmap](#roadmap)
+- [Development](#development)
+    - [Unit Tests](#unit-tests)
+    - [Office Integration Tests](#office-integration-tests)
+    - [All Tests](#all-tests)
 
 ## Getting Started
 
@@ -113,7 +117,7 @@ contains final result of those calculations.
 
 ### PDF Generation
 
-If you're on a system that uses an OpenOffice implementation of Excel, PDF 
+If you're on a system that uses a LibreOffice or Apache OpenOffice implementation of Excel, PDF 
 generation works the same was as creating a spreadsheet:
 
 ```clojure
@@ -251,3 +255,25 @@ For example, you can try:
   not sure what the best way to extract style data is, since there are so many
   possible values.
 
+## Development
+
+### Unit Tests
+
+Standard unit tests can be run with the following command:
+
+`$ lein test`
+
+### Office Integration Tests
+
+This test selector is designed to run tests that are dependent on the presence of LibreOffice or OpenOffice. 
+
+These tests can be run with:
+
+`$ lein test :office-integrations`
+
+### All Tests
+
+Run all tests with the following command:
+
+`$ lein test :all`
+ 
