@@ -8,7 +8,7 @@ boilerplate-free common sense styling.
 
 Lein:
 ```
-[org.clojars.mjdowney/excel-clj "2.0.1"]
+[org.clojars.mjdowney/excel-clj "2.1.0"]
 ```
 
 > Note: Ongoing v1.x support can be found on the 
@@ -276,4 +276,3 @@ These tests can be run with:
 Run all tests with the following command:
 
 `$ lein test :all`
- 

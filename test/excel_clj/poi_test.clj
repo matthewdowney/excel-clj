@@ -11,6 +11,7 @@
          :success)
       "Example function writes successfully."))
 
+
 (deftest performance-test
   (testing "Performance is reasonable"
     (println "Starting performance test -- writing to a temp file...")

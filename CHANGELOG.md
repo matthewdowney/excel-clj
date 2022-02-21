@@ -1,6 +1,21 @@
 # Change Log
 
-## [2.0.0] - TBD
+## [2.1.0] - 2022-02-21
+### Changed
+- Update dependencies and resolve JODConverter breaking changes, including 
+  changes which mitigate some vulnerabilities in commons-compress and 
+  commons-io. See [#13](https://github.com/matthewdowney/excel-clj/pull/13).
+
+
+## [2.0.1] - 2021-02-22
+
+### Changed
+ - Updated dependency versions for taoensso/encore and taoensso/tufte
+### Added
+- Support for `LocalDate` and `LocalDateTime` (see 
+  [#9](https://github.com/matthewdowney/excel-clj/pull/9)).
+
+## [2.0.0] - 2020-10-04
 ### Changed
 - Now uses the POI streaming writer by default (~10x performance gain on 
   sheets > 100k rows)
