@@ -10,12 +10,13 @@
 
   See the (comment) form with examples at the bottom of this namespace."
   {:author "Matthew Downey"}
-  (:require [excel-clj.cell :refer [style data dims wrapped?]]
+  (:require [clojure.pprint :as pprint]
+            [clojure.string :as string]
+
+            [excel-clj.cell :refer [data dims style wrapped?]]
+            [excel-clj.deprecated :as deprecated]
             [excel-clj.file :as file]
             [excel-clj.tree :as tree]
-            [excel-clj.deprecated :as deprecated]
-
-            [clojure.string :as string]
 
             [taoensso.tufte :as tufte])
   (:import (clojure.lang Named)
@@ -52,7 +53,6 @@
       {:data-format :accounting}
 
       :else nil)))
-
 
 (defn table-grid
   "Build a lazy sheet grid from `rows`.
@@ -372,6 +372,90 @@
   viewing."
   [workbook]
   (file/quick-open-pdf! workbook))
+
+
+;; Convenience macro to redirect print-table / print-tree to excel
+
+
+(defonce ^:private var->excel-rebinding (atom {}))
+
+
+(defn declare-excelable!
+  "Redefine some function's `var` to generate Excel output when enclosed in an
+  `excel` macro.
+
+  The `fn` returns a grid (optionally with :excel/sheet-name metadata)."
+  [var fn]
+  (swap! var->excel-rebinding assoc var fn))
+
+
+(declare-excelable! #'pprint/print-table
+  (fn ;; This fn has the same signature as the var it's redefining
+    ([rows] (vary-meta (table-grid rows) merge (meta rows)))
+    ([ks rows] (vary-meta (table-grid ks rows) merge (meta rows)))))
+
+
+(declare-excelable! #'tree/print-table
+  (fn this
+    ([rows]
+     (this
+       (into [""] (remove #{"" :tree/indent}) (keys (data (first rows))))
+       rows))
+    ([ks rows]
+     (vary-meta
+       (table-grid ks
+         (map
+           (fn [{:keys [tree/indent] :as row}]
+             (update row "" #(str (apply str (repeat (or indent 0) " ")) %)))
+           rows))
+       merge (meta rows)))))
+
+
+(defn -build-excel-rebindings [wb-atom var->excel-rebinding]
+  (letfn [(conj-page [sheets contents]
+            (let [sheet-name (or (:excel/sheet-name (meta contents))
+                               (str "Sheet" (inc (count sheets))))]
+              (conj sheets [sheet-name contents])))
+          (conj-page! [contents] (swap! wb-atom conj-page contents))]
+    (update-vals var->excel-rebinding
+      (fn [grid-fn] (comp conj-page! grid-fn)))))
+
+
+(defmacro excel
+  "Build an Excel workbook with whatever data is emitted during the execution
+  of `body` from functions on which `declare-excelable!` has been called.
+
+  If the first argument is a compile-time map, it may contain a :hook function
+  to be called with the final workbook. If no hook is passed, it defaults to
+  `quick-open!`.
+
+  (Compatible by default for `clojure.pprint/print-table` and
+  `excel-clj.tree/print-table`.)
+
+  Returns the return value of `body`."
+  [& body]
+  (let [[opts body] (if (map? (first body))
+                      [(first body) (rest body)]
+                      [{} body])
+        hook (or (:hook opts) quick-open!)]
+    `(let [wb# (atom [])]
+       (with-redefs-fn (-build-excel-rebindings wb# ~(deref var->excel-rebinding))
+         (fn []
+           (let [ret# (do ~@body)]
+             (~hook (apply array-map (mapcat identity @wb#)))
+             ret#))))))
+
+
+(comment
+  ;; For example
+  (excel
+    (do
+      ;; Print a table to one sheet
+      (pprint/print-table (map (fn [i] {"Ch" (char i) "i" i}) (range 33 43)))
+      ;; And a tree to another
+      (let [tbl (tree/table (tree/combined-header) tree/mock-balance-sheet)]
+        (tree/print-table tbl))
+      :ok)))
 
 
 ;; Some v1.X backwards compatibility

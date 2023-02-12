@@ -18,6 +18,7 @@ Lein:
     - [Tables](#tables)
     - [Trees](#trees)
     - [PDF Generation](#pdf-generation)
+    - [Redirecting output from print-table](#redirecting-output-from-print-table)
     - [Style & Cell Merging](#style-&-cell-merging)
     - [What are the options for styling?](#what-are-the-options-for-styling?)
     - [Grids](#grids)
@@ -127,6 +128,27 @@ generation works the same was as creating a spreadsheet:
 ```
 
 ![A PDF is opened](resources/quick-open-pdf.png)
+
+### Redirecting output from print-table
+
+For convenience, there's an `excel` macro which allows you to wrap forms which
+call into `clojure.pprint.print-table` or `excel-clj.tree/print-table` and 
+capture their output in an Excel workbook instead of printing to stdout.
+
+Useful for situations where you would ordinarily print data to the REPL, but 
+sometimes want to generate an Excel file instead.
+
+```clojure
+(excel-clj.core/excel
+  (clojure.pprint/print-table
+    (map
+      (fn [i] {"Ch" (char i) "i" i})
+      (range 33 43)))
+
+  (excel-clj.tree/print-table
+    (excel-clj.tree/table
+      excel-clj.tree/mock-balance-sheet)))
+```
 
 ### Style & Cell Merging
 
