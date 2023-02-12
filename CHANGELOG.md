@@ -1,5 +1,9 @@
 # Change Log
 
+## [2.2.0] - 2023-02-12
+### Added
+- An `excel` macro to capture output from `print-table`. See README.
+
 ## [2.1.0] - 2022-02-21
 ### Changed
 - Update dependencies and resolve JODConverter breaking changes, including 

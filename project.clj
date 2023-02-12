@@ -1,4 +1,4 @@
-(defproject org.clojars.mjdowney/excel-clj "2.1.0"
+(defproject org.clojars.mjdowney/excel-clj "2.2.0"
   :description "Generate Excel documents & PDFs from Clojure data."
   :url "https://github.com/matthewdowney/excel-clj"
   :license {:name "Eclipse Public License"
