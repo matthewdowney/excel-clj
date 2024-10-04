@@ -23,6 +23,7 @@ Lein:
     - [What are the options for styling?](#what-are-the-options-for-styling?)
     - [Grids](#grids)
     - [Templates](#templates)
+    - [Accessing The `Sheet`](#accessing-the-sheet)
 - [Roadmap](#roadmap)
 - [Development](#development)
     - [Unit Tests](#unit-tests)
@@ -269,6 +270,45 @@ For example, you can try:
 (let [template (clojure.java.io/resource "uptime-template.xlsx")
       new-data {"raw" (excel/table-grid example-template-data)}]
   (excel/append! new-data template "filled-in-template.xlsx"))
+```
+
+### Accessing The `Sheet`
+
+There is not a way to directly access the `Sheet` object using the API. Instead,
+following the function `excel-clj.file/write*` as an example, open an Excel file
+and create the `Sheet`.
+
+```clojure
+(require '[clojure.java.io :as io])
+(require '[excel-clj.core :as excel])
+(require '[excel-clj.file :as file])
+(require '[excel-clj.poi :as poi])
+(import '[org.apache.poi.ss.usermodel Sheet])
+
+(let [worksheet-data (excel/table-grid [{:name      "Trip 1"
+                                         :miles     34.5
+                                         :max-speed 15.2}
+                                        {:name      "Trip 2"
+                                         :miles     14.1
+                                         :max-speed 35.2}
+                                        {:name      "Trip 3"
+                                         :miles     18.9
+                                         :max-speed 21.1}])
+      ;; create the .xlsx file
+      xlsx-filename  (file/temp ".xlsx")
+      excel-file     (io/file xlsx-filename)]
+  ;; get the `Sheet` object
+  (with-open [poi-writer (poi/writer excel-file)]
+    (let [sheet-writer (poi/sheet-writer poi-writer "Sheet1")
+          worksheet    ^Sheet (:sheet sheet-writer)]
+      ;; manipulate the `Sheet`
+      (doto worksheet
+        (.setColumnWidth 1 500)
+        (.createFreezePane 0 1))
+      ;; write the data to the `Sheet`
+      (file/write-rows! sheet-writer worksheet-data)))
+  ;; optionally open the created file
+  (file/open excel-file))
 ```
 
 ## Roadmap
