@@ -135,9 +135,17 @@
       (tufte/p :write-cell
         (write-cell! poi-cell value))
 
-      (when-let [cell-style (cell-style-cache style)]
+      (when-let [cell-style (cell-style-cache
+                             (cond-> style
+                                     (contains? style :hyperlink/url)
+                                     (-> (dissoc :hyperlink/url)
+                                         (update :font merge {:underline :single}))))]
         (tufte/p :style-cell
-          (.setCellStyle poi-cell cell-style))))
+          (.setCellStyle poi-cell cell-style)))
+
+      (when-let [url (:hyperlink/url style)]
+        (tufte/p :write-hyperlink-formula
+                 (.setCellFormula poi-cell (format "HYPERLINK(\"%s\", \"%s\")" url value)))))
 
     this)
 
@@ -286,7 +294,7 @@
 
       (newline! t)
       (write! t "Tall Cell" nil 1 2)
-      (write! t "Cell 2")
+      (write! t "Hyper Cell 2" {:hyperlink/url "https://google.com"} 1 1)
       (write! t "Cell 3")
 
       (newline! t)
