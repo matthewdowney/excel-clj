@@ -44,16 +44,17 @@
   [workbook poi-writer {:keys [streaming? auto-size-cols?] :as ops}]
   (doseq [[nm rows] workbook
           :let [sh (poi/sheet-writer poi-writer nm)
+                curr-sheet (:sheet sh)
                 auto-size? (or (true? auto-size-cols?)
                                (get auto-size-cols? nm))]]
 
     (when (and streaming? auto-size?)
-      (.trackAllColumnsForAutoSizing ^SXSSFSheet (:sheet sh)))
+      (.trackAllColumnsForAutoSizing ^SXSSFSheet curr-sheet))
 
     (let [n-cols (write-rows! sh rows)]
       (when auto-size?
         (dotimes [i n-cols]
-          (.autoSizeColumn ^Sheet (:sheet sh) i))))))
+          (.autoSizeColumn ^Sheet curr-sheet i))))))
 
 
 (defn default-ops
